@@ -1,8 +1,9 @@
 {
   "verbose": true,
   "watch": [
-    "node_modules/oae*/"
+    "node_modules/oae*/",
+    "3akai-ux/node_modules/oae*/"
   ],
-  "ignoreRoot": [".git"],
+  "ignoreRoot": [".git", "3akai-ux/.git", "node_modules/oae-rest/.git"],
   "ext": "js json"
 }
