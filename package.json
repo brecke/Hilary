@@ -45,7 +45,7 @@
     "less": "1.7.5",
     "locale": "latest",
     "lunr": "1.0.0",
-    "mailparser": "latest",
+    "mailparser": "0.6.2",
     "make-dir": "^1.0.0",
     "marked": "latest",
     "mime": "latest",
