@@ -47,7 +47,7 @@
     "lunr": "1.0.0",
     "mailparser": "0.6.2",
     "make-dir": "^1.0.0",
-    "marked": "latest",
+    "marked": "^0.3.6",
     "mime": "latest",
     "mixpanel": "latest",
     "mobile-detect": "latest",
