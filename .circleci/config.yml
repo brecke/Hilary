@@ -81,9 +81,13 @@ jobs:
       - run: sudo add-apt-repository ppa:coolwanglu/pdf2htmlex && sudo apt-get update && sudo apt-get install pdf2htmlEX
       - run: wget http://poppler.freedesktop.org/poppler-0.26.5.tar.xz && tar xf poppler-0.26.5.tar.xz && cd poppler-0.26.5 && ./configure --prefix=/usr --enable-xpdf-headers && make && sudo make install
 
+      # diagnostics
       - run: pdf2htmlEX -v
       - run: pdftotext -v
       - run: soffice --version
+      - run: gm -version
+      - run: gs -version
+      - run: docker-compose ps
       # run tests for all modules
       - run: grunt test
 
