@@ -83,7 +83,7 @@ jobs:
 
       - run: pdf2htmlEX -v
       - run: pdftotext -v
-      - run: soffice -v
+      - run: soffice --version
       # run tests for all modules
       - run: grunt test
 
