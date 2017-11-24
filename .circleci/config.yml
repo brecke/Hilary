@@ -72,8 +72,8 @@ jobs:
       - run: docker-compose restart oae-etherpad
       - run: sudo apt-get install -y --no-install-recommends libreoffice libreoffice-writer ure libreoffice-java-common libreoffice-core libreoffice-common # openjdk-7-jre
       - run: sudo apt-get -y -q remove libreoffice-gnome
-      - run: adduser --home=/opt/libreoffice --disabled-password --gecos "" --shell=/bin/bash libreoffice
-      - run: echo "deb http://ftp.de.debian.org/debian sid main" >> /etc/apt/sources.list
+      - run: sudo adduser --home=/opt/libreoffice --disabled-password --gecos "" --shell=/bin/bash libreoffice
+      - run: sudo echo "deb http://ftp.de.debian.org/debian sid main" >> /etc/apt/sources.list
       - run: sudo apt-get update && sudo apt-get install -y --allow-unauthenticated --no-install-recommends   chrpath   libpoppler-glib-dev pdf2htmlex poppler-utils python-poppler && rm -rf /var/lib/apt/lists/*
       # run tests for all modules
       - run: grunt test
