@@ -60,6 +60,11 @@ jobs:
       - run: printf "\n\nconfig.email.transport = 'sendmail';" >> config.js
       - run: printf "\n\nconfig.servers.serverInternalAddress = '0.0.0.0';" >> config.js
       - run: printf "\n\ntmpDir = '~/Hilary/tmp';" >> config.js
+      - run: printf "config.previews.office.timeout = 240000;" >> config.js
+      - run: printf "config.previews.pdf2htmlEX.timeout = 240000;" >> config.js
+      - run: printf "config.previews.pdftotext.timeout = 240000;" >> config.js
+      - run: printf "config.previews.link.renderTimeout = 60000;" >> config.js
+
       # build the hilary:latest image
       - run: docker-compose create --build
       # install dependencies for Hilary
