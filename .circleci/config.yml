@@ -32,7 +32,7 @@ jobs:
       - run: docker-compose run oae-hilary 'npm install -s'
       # run tests for all modules
       - run: docker-compose run oae-hilary 'grunt test'
-  test_with_node:
+  build:
     environment:
       - NODE_VERSION: 6.11.1
     parallelism: 1
@@ -60,10 +60,10 @@ jobs:
       - run: printf "\n\nconfig.email.transport = 'sendmail';" >> config.js
       - run: printf "\n\nconfig.servers.serverInternalAddress = '0.0.0.0';" >> config.js
       - run: printf "\n\ntmpDir = '~/Hilary/tmp';" >> config.js
-      - run: printf "config.previews.office.timeout = 240000;" >> config.js
-      - run: printf "config.previews.pdf2htmlEX.timeout = 240000;" >> config.js
-      - run: printf "config.previews.pdftotext.timeout = 240000;" >> config.js
-      - run: printf "config.previews.link.renderTimeout = 60000;" >> config.js
+      - run: printf "config.previews.office.timeout = 340000;" >> config.js
+      - run: printf "config.previews.pdf2htmlEX.timeout = 340000;" >> config.js
+      - run: printf "config.previews.pdftotext.timeout = 340000;" >> config.js
+      - run: printf "config.previews.link.renderTimeout = 90000;" >> config.js
 
       # build the hilary:latest image
       - run: docker-compose create --build
@@ -100,5 +100,4 @@ workflows:
   version: 2
   test_both_ways:
     jobs:
-      - test_with_node
-      - test_with_dockers
+      - build
