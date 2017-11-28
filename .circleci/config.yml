@@ -69,14 +69,16 @@ jobs:
 
       # install dependencies for Hilary
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends autoconf automake bzip2 ca-certificates curl file g++ gcc ghostscript git graphicsmagick libbz2-dev libc6-dev libcurl4-openssl-dev libevent-dev libffi-dev libgeoip-dev libglib2.0-dev libjpeg-dev liblzma-dev libmagickcore-dev libmagickwand-dev libmysqlclient-dev libncurses-dev libpng-dev libpq-dev libreadline-dev libsqlite3-dev libssl-dev libtool libwebp-dev libxml2-dev libxslt-dev libyaml-dev make openssh-client patch wget xz-utils zlib1g-dev
+
+      # build the hilary:latest image
+      - run: docker-compose create --build
+      - run: docker-compose up -d
+
       # node and npm install
       - run: curl -SLO "https://nodejs.org/dist/v6.11.1/node-v6.11.1-linux-x64.tar.xz" && sudo tar -xJf "node-v6.11.1-linux-x64.tar.xz" -C /usr/local --strip-components=1 && rm "node-v6.11.1-linux-x64.tar.xz" && sudo ln -s /usr/local/bin/node /usr/local/bin/nodejs
       - run: npm install -s
 
-      # build the hilary:latest image
-      - run: docker-compose create --build
-      # - run: docker-compose run oae-hilary 'npm install -s'
-      - run: docker-compose up -d
+      # the reason we do this here is because we need cassandra to boot up before we relaunch etherpad
       - run: docker-compose stop oae-hilary # we won't be needing this anyway
       - run: docker-compose restart oae-etherpad # etherpad has exited by now because cassandra isn't ready yet
 
