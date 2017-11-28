@@ -45,9 +45,9 @@ jobs:
       - run: git submodule foreach -q --recursive 'branch="$(git config -f $toplevel/.gitmodules submodule.$name.branch)"; [ -z "$branch" ] && git checkout master || git checkout $branch'
 
       # change docker-compose absolute paths for volume mounting
-      - run: sed -i -e 's/- \/src\/Hilary/- \/home\/circleci\/Hilary/g' docker-compose.yml
-      - run: sed -i -e 's/- \/src\/files/- \/home\/circleci\/files/g' docker-compose.yml
-      - run: sed -i -e 's/\/src\/tmp/\/home\/circleci\/tmp/g' docker-compose.yml
+      # - run: sed -i -e 's/- \/src\/Hilary/- \/home\/circleci\/Hilary/g' docker-compose.yml
+      # - run: sed -i -e 's/- \/src\/files/- \/home\/circleci\/files/g' docker-compose.yml
+      # - run: sed -i -e 's/\/src\/tmp/\/home\/circleci\/tmp/g' docker-compose.yml
 
       # change some configuration
       - run: printf "\n\nconfig.ui.path = './3akai-ux';" >> config.js
@@ -63,6 +63,7 @@ jobs:
       - run: mkdir -p /home/circleci/Hilary/tmp
       - run: printf "\n\ntmpDir = '/home/circleci/Hilary/tmp';" >> config.js
       # debugging
+      - run: ls -la ../
       - run: cat config.js
 
       # install dependencies for Hilary
