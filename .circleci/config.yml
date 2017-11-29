@@ -13,7 +13,7 @@ jobs:
       - run: sed -i -e 's/- \/src\/Hilary/- \/home\/circleci\/Hilary/g' docker-compose.yml
       - run: sed -i -e 's/- \/src\/files/- \/home\/circleci\/files/g' docker-compose.yml
       - run: sed -i -e 's/\/src\/tmp/\/home\/circleci\/tmp/g' docker-compose.yml
-  test_with_dockers:
+  test-with-dockers:
     parallelism: 1
     machine: true
     working_directory: ~/Hilary
