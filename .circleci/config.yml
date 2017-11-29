@@ -104,5 +104,5 @@ workflows:
   version: 2
   test-all:
     jobs:
-      - test-with-node:
-      - test-with-dockers:
+      - test-with-node
+      - test-with-dockers
