@@ -34,9 +34,9 @@ jobs:
       # run tests for all modules
       - run: docker-compose run oae-hilary 'grunt test'
   test-with-node:
-    environment:
-      - NODE_VERSION: 6.11.1
-    machine: true
+    machine:
+      node:
+        version: 6.12
     working_directory: ~/Hilary
     steps:
       - checkout
@@ -72,11 +72,7 @@ jobs:
       - run: docker-compose up -d
 
       # node and npm install
-      - run: curl -o- https://raw.githubusercontent.com/creationix/nvm/v0.33.6/install.sh | bash
-      - run: export NVM_DIR="/opt/circleci/.nvm"
-      - run: [ -s "$NVM_DIR/nvm.sh" ]
-      - run: \. "$NVM_DIR/nvm.sh"  # This loads nvm
-      - run: nvm install 6.12.0
+      - run: npm install -g npm@3.10.10
       - run: node -v
       - run: npm -v
       - run: npm install
