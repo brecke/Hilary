@@ -2,6 +2,7 @@ version: 2
 jobs:
   checkout:
     machine: true
+    working_directory: ~/Hilary
     steps:
       - checkout
       # checkout submodules
@@ -17,6 +18,8 @@ jobs:
     machine: true
     working_directory: ~/Hilary
     steps:
+      - run: pwd
+      - run: ls -lah
       # change some configuration
       - run: printf "\n\nconfig.ui.path = './3akai-ux';" >> config.js
       - run: printf "\n\nconfig.cassandra.hosts = ['oae-cassandra'];" >> config.js
@@ -43,6 +46,8 @@ jobs:
     machine: true
     working_directory: ~/Hilary
     steps:
+      - run: pwd
+      - run: ls -lah
       - run: mkdir -p ../files
       - run: mkdir -p ../tmp
       # change some configuration
