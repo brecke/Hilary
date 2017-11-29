@@ -1,6 +1,7 @@
 version: 2
 jobs:
-  checkout:
+  test-with-dockers:
+    parallelism: 1
     machine: true
     working_directory: ~/Hilary
     steps:
@@ -13,13 +14,6 @@ jobs:
       - run: sed -i -e 's/- \/src\/Hilary/- \/home\/circleci\/Hilary/g' docker-compose.yml
       - run: sed -i -e 's/- \/src\/files/- \/home\/circleci\/files/g' docker-compose.yml
       - run: sed -i -e 's/\/src\/tmp/\/home\/circleci\/tmp/g' docker-compose.yml
-  test-with-dockers:
-    parallelism: 1
-    machine: true
-    working_directory: ~/Hilary
-    steps:
-      - run: pwd
-      - run: ls -lah
       # change some configuration
       - run: printf "\n\nconfig.ui.path = './3akai-ux';" >> config.js
       - run: printf "\n\nconfig.cassandra.hosts = ['oae-cassandra'];" >> config.js
@@ -46,8 +40,15 @@ jobs:
     machine: true
     working_directory: ~/Hilary
     steps:
-      - run: pwd
-      - run: ls -lah
+      - checkout
+      # checkout submodules
+      - run: git submodule update --init --recursive
+      # checkout master branch of all submodules (default is detached)
+      - run: git submodule foreach -q --recursive 'branch="$(git config -f $toplevel/.gitmodules submodule.$name.branch)"; [ -z "$branch" ] && git checkout master || git checkout $branch'
+      # change docker-compose absolute paths for volume mounting
+      - run: sed -i -e 's/- \/src\/Hilary/- \/home\/circleci\/Hilary/g' docker-compose.yml
+      - run: sed -i -e 's/- \/src\/files/- \/home\/circleci\/files/g' docker-compose.yml
+      - run: sed -i -e 's/\/src\/tmp/\/home\/circleci\/tmp/g' docker-compose.yml
       - run: mkdir -p ../files
       - run: mkdir -p ../tmp
       # change some configuration
@@ -63,9 +64,6 @@ jobs:
       - run: printf "\n\nconfig.servers.serverInternalAddress = '0.0.0.0';" >> config.js
       - run: mkdir -p /home/circleci/Hilary/tmp
       - run: printf "\n\ntmpDir = '/home/circleci/Hilary/tmp';" >> config.js
-
-      # debugging
-      - run: ls -la ../
 
       # install dependencies for Hilary
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends autoconf automake bzip2 ca-certificates curl file g++ gcc ghostscript git graphicsmagick libbz2-dev libc6-dev libcurl4-openssl-dev libevent-dev libffi-dev libgeoip-dev libglib2.0-dev libjpeg-dev liblzma-dev libmagickcore-dev libmagickwand-dev libmysqlclient-dev libncurses-dev libpng-dev libpq-dev libreadline-dev libsqlite3-dev libssl-dev libtool libwebp-dev libxml2-dev libxslt-dev libyaml-dev make openssh-client patch wget xz-utils zlib1g-dev
@@ -106,10 +104,5 @@ workflows:
   version: 2
   test-all:
     jobs:
-      - checkout
       - test-with-node:
-          requires:
-            - checkout
       - test-with-dockers:
-          requires:
-            - checkout
