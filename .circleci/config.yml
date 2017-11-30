@@ -43,7 +43,6 @@ jobs:
         - wget http://poppler.freedesktop.org/poppler-0.26.5.tar.xz && tar xf poppler-0.26.5.tar.xz && cd poppler-0.26.5 && ./configure --prefix=/usr --enable-xpdf-headers && make && sudo make install
         - sudo apt-get -y -q remove libreoffice-gnome
         - sudo adduser --home=/opt/libreoffice --disabled-password --gecos "" --shell=/bin/bash libreoffice
-        - npm install -g npm@3.10.10
       node:
         version: 6.12.0
     working_directory: ~/Hilary
@@ -78,6 +77,7 @@ jobs:
       - run: docker-compose up -d
 
       # node and npm install
+      - run: npm install -g npm@3.10.10 # default npm version is 5 and it doesn't work
       - run: node -v
       - run: npm -v
       - run: npm install
