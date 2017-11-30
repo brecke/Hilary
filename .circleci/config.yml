@@ -72,9 +72,8 @@ jobs:
       - run: mkdir -p /home/circleci/Hilary/tmp
       - run: printf "\n\ntmpDir = '/home/circleci/Hilary/tmp';" >> config.js
 
-      # build the hilary:latest image
-      - run: docker-compose create --build
-      - run: docker-compose up -d
+      # build the hilary:latest image and run all dockers
+      - run: docker-compose up --build -d
 
       # node and npm install
       - run: npm install -g npm@3.10.10 # default npm version is 5 and it doesn't work
