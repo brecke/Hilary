@@ -33,7 +33,7 @@ jobs:
       - run: docker-compose run oae-hilary 'grunt test'
   test-with-node:
     environment:
-      - NODE_VERSION: 6.12.0
+      - NODE_VERSION: 6.11.5
     machine: true
     working_directory: ~/Hilary
     steps:
@@ -71,8 +71,6 @@ jobs:
       - run: sudo apt-get -y -q remove libreoffice-gnome
       - run: sudo adduser --home=/opt/libreoffice --disabled-password --gecos "" --shell=/bin/bash libreoffice
 
-      # install node
-      - run: curl -SLO "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-$ARCH.tar.xz" && tar -xJf "node-v$NODE_VERSION-linux-$ARCH.tar.xz" -C /usr/local --strip-components=1 --no-same-owner && rm "node-v$NODE_VERSION-linux-$ARCH.tar.xz" && ln -s /usr/local/bin/node /usr/local/bin/nodejs
       # node and npm install
       - run: npm install -g npm@3.10.10 # default npm version is 5 and it doesn't work
       - run: node -v
