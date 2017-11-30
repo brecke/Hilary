@@ -47,7 +47,7 @@ services:
       - "admin.oae.com:172.20.0.9"
     #   - "tenant1.oae.com:172.20.0.9"
       # - "any.other.host.oae.com:172.20.0.9"
-    image: alpine-hilary-deps:latest
+    image: oaeproject/oae-hilary-deps-docker
     networks:
       - my_network
     ports:
