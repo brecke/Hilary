@@ -1,5 +1,7 @@
 # Open Academic Environment (OAE Project)
 
+[![Greenkeeper badge](https://badges.greenkeeper.io/brecke/Hilary.svg)](https://greenkeeper.io/)
+
 Hilary is the back-end for the [Open Academic Environment](http://www.oaeproject.org/)
 
 [![Gitter](https://badges.gitter.im/gitterHQ/gitter.svg)](https://gitter.im/oaeproject)
