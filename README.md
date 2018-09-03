@@ -12,6 +12,7 @@ Hilary is the back-end for the [Open Academic Environment](http://www.oaeproject
 [![Codacy Badge](https://api.codacy.com/project/badge/Grade/d26faffabfac4ce0a84a1d533d3e005c)](https://www.codacy.com/app/brecke/brecke-3akai-ux?utm_source=github.com&utm_medium=referral&utm_content=brecke/3akai-ux&utm_campaign=Badge_Grade)
 [![dependencies](https://david-dm.org/oaeproject/Hilary.svg)](https://david-dm.org/oaeproject/Hilary)
 [![devdependencies](https://david-dm.org/oaeproject/Hilary/dev-status.svg)](https://david-dm.org/oaeproject/Hilary#info=devDependencies)
+<a href="https://koding.com/"> <img src="https://koding-cdn.s3.amazonaws.com/badges/made-with-koding/v1/koding_badge_ReadmeDark.png" srcset="https://koding-cdn.s3.amazonaws.com/badges/made-with-koding/v1/koding_badge_ReadmeDark.png 1x, https://koding-cdn.s3.amazonaws.com/badges/made-with-koding/v1/koding_badge_ReadmeDark@2x.png 2x" alt="Made with Koding" /> </a>
 
 ## Installation
 
