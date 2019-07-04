@@ -1,5 +1,5 @@
 # Snyk (https://snyk.io) policy file, patches or ignores known vulnerabilities.
-version: v1.8.0
+version: v1.13.5
 ignore: {}
 # patches apply the minimum changes required to fix a vulnerability
 patch:
@@ -14,3 +14,40 @@ patch:
   'npm:marked:20170112':
     - marked:
         patched: '2017-11-07T10:24:54.317Z'
+  SNYK-JS-LODASH-450202:
+    - snyk > snyk-nodejs-lockfile-parser > lodash:
+        patched: '2019-07-04T08:35:26.497Z'
+    - async > lodash:
+        patched: '2019-07-04T08:35:26.497Z'
+    - nodegit > lodash:
+        patched: '2019-07-04T08:35:26.497Z'
+    - cheerio > lodash:
+        patched: '2019-07-04T08:35:26.497Z'
+    - snyk > @snyk/dep-graph > lodash:
+        patched: '2019-07-04T08:35:26.497Z'
+    - snyk > snyk-php-plugin > lodash:
+        patched: '2019-07-04T08:35:26.497Z'
+    - nodemailer-html-to-text > html-to-text > lodash:
+        patched: '2019-07-04T08:35:26.497Z'
+    - snyk > inquirer > lodash:
+        patched: '2019-07-04T08:35:26.497Z'
+    - snyk > snyk-config > lodash:
+        patched: '2019-07-04T08:35:26.497Z'
+    - snyk > lodash:
+        patched: '2019-07-04T08:35:26.497Z'
+    - snyk > snyk-nuget-plugin > lodash:
+        patched: '2019-07-04T08:35:26.497Z'
+    - nodegit > request-promise-native > request-promise-core > lodash:
+        patched: '2019-07-04T08:35:26.497Z'
+    - snyk > snyk-go-plugin > graphlib > lodash:
+        patched: '2019-07-04T08:35:26.497Z'
+    - snyk > @snyk/dep-graph > graphlib > lodash:
+        patched: '2019-07-04T08:35:26.497Z'
+    - juice > web-resource-inliner > async > lodash:
+        patched: '2019-07-04T08:35:26.497Z'
+    - snyk > snyk-nodejs-lockfile-parser > graphlib > lodash:
+        patched: '2019-07-04T08:35:26.497Z'
+    - youtube-api > googleapis > request > form-data > async > lodash:
+        patched: '2019-07-04T08:35:26.497Z'
+    - youtube-api > googleapis > google-auth-library > request > form-data > async > lodash:
+        patched: '2019-07-04T08:35:26.497Z'
