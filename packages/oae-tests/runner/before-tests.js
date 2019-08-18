@@ -19,7 +19,7 @@ import nock from 'nock';
 
 const log = logger('before-tests');
 
-const DEFAULT_TIMEOUT = 60000;
+const DEFAULT_TIMEOUT = 90000;
 
 // eslint-disable-next-line no-unused-vars
 const { argv } = require('optimist')
@@ -65,6 +65,9 @@ afterEach(function(callback) {
 
 // Executed once all of the tests for all of the different modules have finished running or
 // when one of the tests has caused an error. Drop the keyspace after all the tests are done
-after(callback => {
-  TestsUtil.cleanUpAfterTests(callback);
+after(function(done) {
+  log().info('Finished all tests. Cleaning up...');
+  TestsUtil.cleanUpAfterTests().then(() => {
+    return done();
+  });
 });

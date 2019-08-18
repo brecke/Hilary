@@ -13,7 +13,7 @@
  * permissions and limitations under the License.
  */
 
-import mkdirp from 'mkdirp';
+import { ensureDir } from 'fs-extra';
 
 import * as Cleaner from 'oae-util/lib/cleaner';
 import { logger } from 'oae-logger';
@@ -52,17 +52,11 @@ export function init(config, callback) {
   Ethercalc.refreshConfiguration(config.ethercalc);
 
   ContentSearch.init(err => {
-    if (err) {
-      return callback(err);
-    }
+    if (err) return callback(err);
 
     // Create the directory where files will be stored.
-    mkdirp(config.files.uploadDir, err => {
-      if (err && err.code !== 'EEXIST') {
-        log().error({ err }, 'Could not create the directory where uploaded files can be stored.');
-        return callback(err);
-      }
-
+    // mkdirp(config.files.uploadDir, err => {
+    return ensureDir(config.files.uploadDir).then(() => {
       if (config.files.cleaner.enabled) {
         // Start a timed process that checks the uploaded dir and remove files
         // which should not be there.
@@ -70,42 +64,28 @@ export function init(config, callback) {
       }
 
       LocalStorage.init(config.files.localStorageDirectory, err => {
-        if (err) {
-          return callback(err);
-        }
+        if (err) return callback(err);
 
         // Handle "publish" messages that are sent from Etherpad via RabbitMQ. These messages
         // indicate that a user made edits and has closed the document
-        TaskQueue.bind(ContentConstants.queue.ETHERPAD_PUBLISH, ContentAPI.handlePublish, null, err => {
-          if (err) {
-            return callback(err);
-          }
-
-          // Same for Ethercalc - no ack because ack breaks Ethercalc
-          TaskQueue.bind(
-            ContentConstants.queue.ETHERCALC_EDIT,
-            Ethercalc.setEditedBy,
-            { subscribe: { ack: false } },
-            function(err) {
-              if (err) {
-                return callback(err);
-              }
-
-              TaskQueue.bind(
-                ContentConstants.queue.ETHERCALC_PUBLISH,
-                ContentAPI.ethercalcPublish,
-                { subscribe: { ack: false } },
-                function(err) {
-                  if (err) {
-                    return callback(err);
-                  }
-
-                  return callback();
-                }
-              );
-            }
-          );
-        });
+        return TaskQueue.bind(ContentConstants.queue.ETHERPAD_PUBLISH, ContentAPI.handlePublish, null)
+          .then(() => {
+            // Same for Ethercalc - no ack because ack breaks Ethercalc
+            return TaskQueue.bind(ContentConstants.queue.ETHERCALC_EDIT, Ethercalc.setEditedBy, {
+              subscribe: { ack: false }
+            });
+          })
+          .then(() => {
+            return TaskQueue.bind(ContentConstants.queue.ETHERCALC_PUBLISH, ContentAPI.ethercalcPublish, {
+              subscribe: { ack: false }
+            });
+          })
+          .then(() => {
+            return callback();
+          })
+          .catch(error => {
+            log().error({ err: error }, 'Could not create the directory where uploaded files can be stored.');
+          });
       });
     });
   });

@@ -174,24 +174,28 @@ const AUTHENTICATION_TIMEOUT = 5000;
  * @param  {Function} callback      Standard callback function
  * @param  {Object}   callback.err  An error that occurred, if any
  */
-const init = function(callback) {
+const init = async function() {
   // Declare the push exchange
-  MQ.declareExchange(QueueConstants.exchange.NAME, QueueConstants.exchange.OPTIONS, err => {
+  await MQ.declareExchange(QueueConstants.exchange.NAME, QueueConstants.exchange.OPTIONS);
+  /*
+   err => {
     if (err) {
       return callback(err);
     }
+    */
 
-    // Create our queue
-    queueName = QueueConstants.queue.PREFIX + ShortId.generate();
-    MQ.declareQueue(queueName, QueueConstants.queue.OPTIONS, err => {
+  // Create our queue
+  queueName = QueueConstants.queue.PREFIX + ShortId.generate();
+  await MQ.declareQueue(queueName, QueueConstants.queue.OPTIONS);
+  /*
+     err => {
       if (err) {
         return callback(err);
       }
+      */
 
-      // Subscribe to our queue for new events
-      return MQ.subscribeQueue(queueName, QueueConstants.subscribe.OPTIONS, _handlePushActivity, callback);
-    });
-  });
+  // Subscribe to our queue for new events
+  await MQ.subscribeQueue(queueName, QueueConstants.subscribe.OPTIONS, _handlePushActivity);
 };
 
 /**
@@ -540,14 +544,15 @@ const _subscribe = function(connectionInfo, message) {
  * @param  {Object}     callback.err        An error that occurred, if any
  * @api private
  */
-const _bindQueue = function(activityStreamId, callback) {
+const _bindQueue = async function(activityStreamId, callback) {
   // If this is the first time we see this stream we'll need to bind this app server to receive
   // events from RabbitMQ
   if (connectionInfosPerStream[activityStreamId]) {
     return callback();
   }
 
-  MQ.bindQueueToExchange(queueName, QueueConstants.exchange.NAME, activityStreamId, callback);
+  await MQ.bindQueueToExchange(queueName, QueueConstants.exchange.NAME, activityStreamId);
+  return callback();
 
   // If we've seen this stream before, we're already listening for events for that stream
   // so there is no need to bind again
@@ -614,8 +619,8 @@ const _writeResponse = function(connectionInfo, id, error) {
  * @param  {Activity[]}     routedActivity.activities   The actual activity objects
  * @api private
  */
-const _push = function(activityStreamId, routedActivity) {
-  MQ.submit(QueueConstants.exchange.NAME, activityStreamId, routedActivity, QueueConstants.publish.OPTIONS);
+const _push = async function(activityStreamId, routedActivity) {
+  await MQ.submit(QueueConstants.exchange.NAME, activityStreamId, routedActivity, QueueConstants.publish.OPTIONS);
 };
 
 /**
@@ -626,40 +631,46 @@ const _push = function(activityStreamId, routedActivity) {
  * @param  {Function}      callback    Standard callback function
  * @api private
  */
-const _handlePushActivity = function(data, callback) {
-  const activityStreamId = ActivityUtil.createActivityStreamId(data.resourceId, data.streamType);
+const _handlePushActivity = function(data) {
+  return new Promise((resolve, reject) => {
+    const activityStreamId = ActivityUtil.createActivityStreamId(data.resourceId, data.streamType);
 
-  let todo = 0;
+    let todo = 0;
 
-  // Iterate over the sockets that are interested in this stream, transform the activity and send it down the socket
-  _.each(connectionInfosPerStream[activityStreamId], connectionInfo => {
-    const { socket } = connectionInfo;
-    _.each(connectionInfo.transformerTypes[activityStreamId], transformerType => {
-      todo++;
-      // Because we're sending these activities to possible multiple sockets/users we'll need to clone and transform it for each socket
-      const activities = clone(data.activities);
-      ActivityTransformer.transformActivities(connectionInfo.ctx, activities, transformerType, err => {
-        if (err) {
-          return log().error({ err }, 'Could not transform event');
-        }
+    // Iterate over the sockets that are interested in this stream, transform the activity and send it down the socket
+    _.each(connectionInfosPerStream[activityStreamId], connectionInfo => {
+      const { socket } = connectionInfo;
+      _.each(connectionInfo.transformerTypes[activityStreamId], transformerType => {
+        todo++;
+        // Because we're sending these activities to possible multiple sockets/users we'll need to clone and transform it for each socket
+        const activities = clone(data.activities);
+        ActivityTransformer.transformActivities(connectionInfo.ctx, activities, transformerType, err => {
+          if (err) {
+            log().error({ err }, 'Could not transform event');
+            reject(err);
+          }
 
-        const msgData = {
-          resourceId: data.resourceId,
-          streamType: data.streamType,
-          activities,
-          format: transformerType,
-          numNewActivities: data.numNewActivities
-        };
-        log().trace({ data: msgData, sid: socket.id }, 'Pushing message to socket');
-        const msg = JSON.stringify(msgData);
-        socket.write(msg);
+          const msgData = {
+            resourceId: data.resourceId,
+            streamType: data.streamType,
+            activities,
+            format: transformerType,
+            numNewActivities: data.numNewActivities
+          };
+          log().trace({ data: msgData, sid: socket.id }, 'Pushing message to socket');
+          const msg = JSON.stringify(msgData);
+          socket.write(msg);
 
-        todo--;
-        if (todo === 0) {
-          callback();
-        }
+          todo--;
+          if (todo === 0) {
+            // callback();
+            resolve();
+          }
+        });
       });
     });
+  }).catch(error => {
+    throw error;
   });
 };
 

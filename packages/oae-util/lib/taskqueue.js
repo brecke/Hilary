@@ -59,7 +59,10 @@ const Constants = {
  * @param  {Function}   callback    Standard callback function
  */
 const init = function(callback) {
-  MQ.declareExchange(Constants.DEFAULT_TASK_EXCHANGE_NAME, Constants.DEFAULT_TASK_EXCHANGE_OPTS, callback);
+  return MQ.declareExchange(Constants.DEFAULT_TASK_EXCHANGE_NAME, Constants.DEFAULT_TASK_EXCHANGE_OPTS).then(() => {
+    // TODO remove this when possible
+    return callback();
+  });
 };
 
 /**
@@ -77,33 +80,32 @@ const init = function(callback) {
  * @param  {Object}     [options.subscribe]     A set of options that can override the `Constants.DEFAULT_TASK_QUEUE_SUBSCRIBE_OPTS`.
  * @param  {Function}   callback                Standard callback function
  */
-const bind = function(taskQueueId, listener, options, callback) {
+const bind = function(taskQueueId, listener, options) {
   options = options || {};
   options.queue = options.queue || {};
   options.subscribe = options.subscribe || {};
 
   // 1. Declare the queue.
   const queueOptions = _.defaults(options.queue, Constants.DEFAULT_TASK_QUEUE_OPTS);
-  _declareQueue(taskQueueId, queueOptions, err => {
-    if (err) {
-      return callback(err);
-    }
 
-    /*
-     * 2. Bind queue to the default exchange
-     *
-     * We use the `taskQueueId` for both the name as the queue and the routing key.
-     */
-    MQ.bindQueueToExchange(taskQueueId, Constants.DEFAULT_TASK_EXCHANGE_NAME, taskQueueId, err => {
-      if (err) {
-        return callback(err);
-      }
-
+  return _declareQueue(taskQueueId, queueOptions)
+    .then(() => {
+      /*
+       * 2. Bind queue to the default exchange
+       *
+       * We use the `taskQueueId` for both the name as the queue and the routing key.
+       */
+      return MQ.bindQueueToExchange(taskQueueId, Constants.DEFAULT_TASK_EXCHANGE_NAME, taskQueueId);
+    })
+    .then(() => {
       // 3. Subscribe to the queue
       const subscribeOptions = _.defaults(options.subscribe, Constants.DEFAULT_TASK_QUEUE_SUBSCRIBE_OPTS);
-      MQ.subscribeQueue(taskQueueId, subscribeOptions, listener, callback);
+      return MQ.subscribeQueue(taskQueueId, subscribeOptions, listener);
+    })
+    .catch(error => {
+      // TODO
+      console.log(error);
     });
-  });
 };
 
 /**
@@ -111,12 +113,12 @@ const bind = function(taskQueueId, listener, options, callback) {
  *
  * @see bind
  */
-const _declareQueue = function(taskQueueId, queueOptions, callback) {
-  if (MQ.isQueueDeclared(taskQueueId)) {
-    return callback();
-  }
-
-  MQ.declareQueue(taskQueueId, queueOptions, callback);
+const _declareQueue = function(taskQueueId, queueOptions) {
+  return Promise.resolve().then(() => {
+    if (!MQ.isQueueDeclared(taskQueueId)) {
+      return MQ.declareQueue(taskQueueId, queueOptions);
+    }
+  });
 };
 
 /**
@@ -126,8 +128,8 @@ const _declareQueue = function(taskQueueId, queueOptions, callback) {
  * @param  {Function}   callback        Standard callback function
  * @param  {Object}     callback.err    An error that occurred, if any
  */
-const unbind = function(taskQueueId, callback) {
-  MQ.unsubscribeQueue(taskQueueId, callback);
+const unbind = function(taskQueueId) {
+  return MQ.unsubscribeQueue(taskQueueId);
 };
 
 /**
@@ -137,8 +139,9 @@ const unbind = function(taskQueueId, callback) {
  * @param  {Object}     taskData        The data that should be made available to the consumer of this task
  * @param  {Function}   callback        Standard callback function
  */
-const submit = function(taskQueueId, taskData, callback) {
-  MQ.submit(Constants.DEFAULT_TASK_EXCHANGE_NAME, taskQueueId, taskData, null, callback);
+const submit = function(taskQueueId, taskData) {
+  // return MQ.submit(Constants.DEFAULT_TASK_EXCHANGE_NAME, taskQueueId, Buffer.from([taskData]));
+  return MQ.submit(Constants.DEFAULT_TASK_EXCHANGE_NAME, taskQueueId, taskData);
 };
 
 export { Constants, init, bind, unbind, submit };

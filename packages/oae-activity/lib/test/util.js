@@ -37,7 +37,7 @@ import { ActivityConstants } from 'oae-activity/lib/constants';
  * @param  {Function}   callback        Standard callback function
  * @param  {Object}     callback.err    An error that occurred, if any
  */
-const refreshConfiguration = function(config, callback) {
+const refreshConfiguration = async function(config, callback) {
   config = _.extend(
     {
       collectionPollingFrequency: -1,
@@ -45,7 +45,8 @@ const refreshConfiguration = function(config, callback) {
     },
     config
   );
-  ActivityAPI.refreshConfiguration(config, callback);
+  await ActivityAPI.refreshConfiguration(config);
+  callback();
 };
 
 /**

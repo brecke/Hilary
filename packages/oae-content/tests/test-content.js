@@ -64,29 +64,36 @@ describe('Content', () => {
     // Log in the tenant admin so his cookie jar is set up appropriately. This is because TestsUtil.generateTestUsers
     // will concurrently try and create users, which causes race conditions when trying to authenticate the rest
     // context.
-    RestAPI.User.getMe(camAdminRestContext, (err, meObj) => {
+    RestAPI.User.getMe(camAdminRestContext, async (err, meObj) => {
       assert.ok(!err);
 
       // Unbind the current handler, if any
-      TaskQueue.unbind(PreviewConstants.MQ.TASK_REGENERATE_PREVIEWS, err => {
+      await TaskQueue.unbind(PreviewConstants.MQ.TASK_REGENERATE_PREVIEWS);
+      /*
+      , err => {
         assert.ok(!err);
+        */
 
-        /*!
-         * Task handler that will just drain the queue.
-         *
-         * @see MQ#bind
-         */
-        const _handleTaskDrain = function(data, mqCallback) {
+      /*!
+       * Task handler that will just drain the queue.
+       *
+       * @see MQ#bind
+       */
+      const _handleTaskDrain = function(data) {
+        return new Promise((resolve, reject) => {
           // Simply callback, which acknowledges the message without doing anything.
-          mqCallback();
-        };
-
-        // Drain the queue
-        TaskQueue.bind(PreviewConstants.MQ.TASK_REGENERATE_PREVIEWS, _handleTaskDrain, null, err => {
-          assert.ok(!err);
-          callback();
+          resolve();
         });
-      });
+      };
+
+      // Drain the queue
+      await TaskQueue.bind(PreviewConstants.MQ.TASK_REGENERATE_PREVIEWS, _handleTaskDrain, null);
+      /*
+         err => {
+          assert.ok(!err);
+        });
+        */
+      callback();
     });
   });
 

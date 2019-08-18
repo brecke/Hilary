@@ -151,17 +151,30 @@ const bootstrapModulesInit = function(modules, config, callback) {
  * @api private
  */
 const bootstrapModulesRest = function(modules, callback) {
+  async.eachSeries(
+    modules,
+    (module, done) => {
+      const path = OaeUtil.getNodeModulesDir() + module + '/lib/rest.js';
+      if (fs.existsSync(path)) {
+        log().info('REST services for %s have been registered', module);
+        require(module + '/lib/rest');
+      }
+
+      // Swagger document all modules
+      return Swagger.documentModule(module, done);
+    },
+    err => {
+      if (err) return callback(err);
+
+      callback();
+    }
+  );
+
+  /*
   const complete = _.after(modules.length, callback);
   _.each(modules, module => {
-    const path = OaeUtil.getNodeModulesDir() + module + '/lib/rest.js';
-    if (fs.existsSync(path)) {
-      log().info('REST services for %s have been registered', module);
-      require(module + '/lib/rest');
-    }
-
-    // Swagger document all modules
-    return Swagger.documentModule(module, complete);
   });
+  */
 };
 
 /// ////////////////////

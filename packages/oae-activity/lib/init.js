@@ -28,13 +28,16 @@ import * as Notifications from './internal/notifications';
 // eslint-disable-next-line no-unused-vars
 import * as Email from './internal/email';
 
-export function init(config, callback) {
-  ActivityAPI.refreshConfiguration(config.activity, err => {
+export async function init(config, callback) {
+  await ActivityAPI.refreshConfiguration(config.activity);
+  /*
+   err => {
     if (err) {
       return callback(err);
     }
+    */
 
-    // Configure the push notifications
-    ActivityPush.init(callback);
-  });
+  // Configure the push notifications
+  await ActivityPush.init();
+  callback();
 }

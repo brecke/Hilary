@@ -41,7 +41,9 @@ const Telemetry = telemetry('activity');
  * @param  {Function}      [callback]          Invoked when the process completes
  * @param  {Object}        [callback.err]      An error that occurred, if any
  */
-const routeActivity = function(activitySeed, callback) {
+const routeActivity = function(activitySeed) {
+  return new Promise((resolve, reject) => {
+    /*
   callback =
     callback ||
     function(err) {
@@ -49,160 +51,169 @@ const routeActivity = function(activitySeed, callback) {
         log().error({ err, activitySeed }, 'Error handling activity');
       }
     };
+    */
 
-  log().trace({ activitySeed }, 'Routing activity seed');
+    log().trace({ activitySeed }, 'Routing activity seed');
 
-  // Record the amount of time the activity sat in the message queue before routing began
-  Telemetry.appendDuration('mq.time', activitySeed.published);
-  const routingStartTime = Date.now();
+    // Record the amount of time the activity sat in the message queue before routing began
+    Telemetry.appendDuration('mq.time', activitySeed.published);
+    const routingStartTime = Date.now();
 
-  // Produce all of the activity entities
-  _produceAllEntities(activitySeed, (err, actor, object, target) => {
-    if (err) {
-      log().error({ err, activitySeed }, 'An error occurred when producing the entities for an activity seed');
-      return callback(err);
-    }
-
-    // Produce the routes from the actor, object and target entities
-    _produceAllRoutes(activitySeed, actor, object, target, (err, routes) => {
+    // Produce all of the activity entities
+    _produceAllEntities(activitySeed, (err, actor, object, target) => {
       if (err) {
-        log().error({ err, activitySeed }, 'An error occurred when producing the routes for an activity seed');
+        log().error({ err, activitySeed }, 'An error occurred when producing the entities for an activity seed');
         return callback(err);
       }
 
-      if (_.isEmpty(routes)) {
-        // If no routes were generated then we're done
-        return callback();
-      }
-
-      // A hash that maps: {resourceId -> streamType -> activity} for each routed destination of an activity
-      const allRoutedActivities = {};
-
-      // A hash that maps {activityId -> activity} for each activity that will be delivered to
-      // a persistent activity stream
-      const allDeliveredActivities = {};
-
-      // Generate an ID for this activity
-      const activityId = ActivityDAO.createActivityId(activitySeed.published);
-
-      // Create the routed activities
-      _.each(routes, route => {
-        // Create the activity metadata
-        const activity = {};
-        activity[ActivityConstants.properties.OAE_ACTIVITY_TYPE] = activitySeed.activityType;
-        activity[ActivityConstants.properties.OAE_ACTIVITY_ID] = activityId;
-        activity.verb = activitySeed.verb;
-        activity.published = activitySeed.published;
-
-        if (actor) {
-          activity.actor = actor;
-        }
-
-        if (object) {
-          activity.object = object;
-        }
-
-        if (target) {
-          activity.target = target;
-        }
-
-        // Index all routed activities by their id and stream type
-        allRoutedActivities[route.resourceId] = allRoutedActivities[route.resourceId] || {};
-        allRoutedActivities[route.resourceId][route.streamType] = activity;
-
-        // Select the activities that are not part of a transient route so they can be stored
-        let activityStreamId = null;
-        if (!route.transient) {
-          activityStreamId = ActivityUtil.createActivityStreamId(route.resourceId, route.streamType);
-          allDeliveredActivities[activityStreamId] = activity;
-        }
-
-        // Do some visibility bucketing if the stream requires it
-        const stream = ActivityRegistry.getRegisteredActivityStreamType(route.streamType);
-        if (stream && stream.visibilityBucketing) {
-          // Determine if all the entities in the activity are public
-          // so we can safely route to public activity streams
-          if (_canRouteToPublicStream(actor, object, target)) {
-            // If we're routing to a user who is also the actor of the activity we
-            // will also route the activity to the public activitystream of the user
-            if (AuthzUtil.isUserId(route.resourceId) && route.resourceId === actor.id) {
-              allRoutedActivities[route.resourceId][route.streamType + '#public'] = activity;
-              if (!route.transient) {
-                activityStreamId = ActivityUtil.createActivityStreamId(route.resourceId, route.streamType + '#public');
-                allDeliveredActivities[activityStreamId] = activity;
-              }
-            }
-
-            // If a group is involved in a public activity we route the activity to the group's public activity stream
-            const publicGroupEntity = _getGroupEntity(actor, object, target);
-            if (publicGroupEntity) {
-              allRoutedActivities[publicGroupEntity.id] = allRoutedActivities[publicGroupEntity.id] || {};
-              allRoutedActivities[publicGroupEntity.id][route.streamType + '#public'] = activity;
-
-              if (!route.transient) {
-                activityStreamId = ActivityUtil.createActivityStreamId(
-                  publicGroupEntity.id,
-                  route.streamType + '#public'
-                );
-                allDeliveredActivities[activityStreamId] = activity;
-              }
-            }
-          }
-
-          // Determine if all the entities in the activity are public or loggedin
-          // so we can safely route to loggedin activity streams
-          if (_canRouteToLoggedinStream(actor, object, target)) {
-            // If we're routing to a user who is also the actor of the activity we
-            // will also route the activity to the loggedin activitystream of the user
-            if (AuthzUtil.isUserId(route.resourceId) && route.resourceId === actor.id) {
-              allRoutedActivities[route.resourceId][route.streamType + '#loggedin'] = activity;
-              if (!route.transient) {
-                activityStreamId = ActivityUtil.createActivityStreamId(
-                  route.resourceId,
-                  route.streamType + '#loggedin'
-                );
-                allDeliveredActivities[activityStreamId] = activity;
-              }
-            }
-
-            // If a group is involved in a loggedin activity we route the activity to the group's loggedin activity stream
-            const loggedinGroupEntity = _getGroupEntity(actor, object, target);
-            if (loggedinGroupEntity) {
-              allRoutedActivities[loggedinGroupEntity.id] = allRoutedActivities[loggedinGroupEntity.id] || {};
-              allRoutedActivities[loggedinGroupEntity.id][route.streamType + '#loggedin'] = activity;
-
-              if (!route.transient) {
-                activityStreamId = ActivityUtil.createActivityStreamId(
-                  loggedinGroupEntity.id,
-                  route.streamType + '#loggedin'
-                );
-                allDeliveredActivities[activityStreamId] = activity;
-              }
-            }
-          }
-        }
-      });
-
-      log().trace({ activitySeed, allRoutedActivities }, 'Finished routed activities');
-
-      // Queue the activity entities to be collected and aggregated
-      _queueActivities(activitySeed, allDeliveredActivities, err => {
+      // Produce the routes from the actor, object and target entities
+      _produceAllRoutes(activitySeed, actor, object, target, (err, routes) => {
         if (err) {
+          log().error({ err, activitySeed }, 'An error occurred when producing the routes for an activity seed');
           return callback(err);
         }
 
-        // Emit an event for the routed activities
-        ActivityEmitter.emit(ActivityConstants.events.ROUTED_ACTIVITIES, allRoutedActivities);
+        if (_.isEmpty(routes)) {
+          // If no routes were generated then we're done
+          return callback();
+        }
 
-        // The number of activities that were handled
-        Telemetry.incr('count');
+        // A hash that maps: {resourceId -> streamType -> activity} for each routed destination of an activity
+        const allRoutedActivities = {};
 
-        // How many routed activities are created and how long it took
-        Telemetry.incr('routed.count', _.values(allDeliveredActivities).length);
-        Telemetry.appendDuration('routing.time', routingStartTime);
-        return callback();
+        // A hash that maps {activityId -> activity} for each activity that will be delivered to
+        // a persistent activity stream
+        const allDeliveredActivities = {};
+
+        // Generate an ID for this activity
+        const activityId = ActivityDAO.createActivityId(activitySeed.published);
+
+        // Create the routed activities
+        _.each(routes, route => {
+          // Create the activity metadata
+          const activity = {};
+          activity[ActivityConstants.properties.OAE_ACTIVITY_TYPE] = activitySeed.activityType;
+          activity[ActivityConstants.properties.OAE_ACTIVITY_ID] = activityId;
+          activity.verb = activitySeed.verb;
+          activity.published = activitySeed.published;
+
+          if (actor) {
+            activity.actor = actor;
+          }
+
+          if (object) {
+            activity.object = object;
+          }
+
+          if (target) {
+            activity.target = target;
+          }
+
+          // Index all routed activities by their id and stream type
+          allRoutedActivities[route.resourceId] = allRoutedActivities[route.resourceId] || {};
+          allRoutedActivities[route.resourceId][route.streamType] = activity;
+
+          // Select the activities that are not part of a transient route so they can be stored
+          let activityStreamId = null;
+          if (!route.transient) {
+            activityStreamId = ActivityUtil.createActivityStreamId(route.resourceId, route.streamType);
+            allDeliveredActivities[activityStreamId] = activity;
+          }
+
+          // Do some visibility bucketing if the stream requires it
+          const stream = ActivityRegistry.getRegisteredActivityStreamType(route.streamType);
+          if (stream && stream.visibilityBucketing) {
+            // Determine if all the entities in the activity are public
+            // so we can safely route to public activity streams
+            if (_canRouteToPublicStream(actor, object, target)) {
+              // If we're routing to a user who is also the actor of the activity we
+              // will also route the activity to the public activitystream of the user
+              if (AuthzUtil.isUserId(route.resourceId) && route.resourceId === actor.id) {
+                allRoutedActivities[route.resourceId][route.streamType + '#public'] = activity;
+                if (!route.transient) {
+                  activityStreamId = ActivityUtil.createActivityStreamId(
+                    route.resourceId,
+                    route.streamType + '#public'
+                  );
+                  allDeliveredActivities[activityStreamId] = activity;
+                }
+              }
+
+              // If a group is involved in a public activity we route the activity to the group's public activity stream
+              const publicGroupEntity = _getGroupEntity(actor, object, target);
+              if (publicGroupEntity) {
+                allRoutedActivities[publicGroupEntity.id] = allRoutedActivities[publicGroupEntity.id] || {};
+                allRoutedActivities[publicGroupEntity.id][route.streamType + '#public'] = activity;
+
+                if (!route.transient) {
+                  activityStreamId = ActivityUtil.createActivityStreamId(
+                    publicGroupEntity.id,
+                    route.streamType + '#public'
+                  );
+                  allDeliveredActivities[activityStreamId] = activity;
+                }
+              }
+            }
+
+            // Determine if all the entities in the activity are public or loggedin
+            // so we can safely route to loggedin activity streams
+            if (_canRouteToLoggedinStream(actor, object, target)) {
+              // If we're routing to a user who is also the actor of the activity we
+              // will also route the activity to the loggedin activitystream of the user
+              if (AuthzUtil.isUserId(route.resourceId) && route.resourceId === actor.id) {
+                allRoutedActivities[route.resourceId][route.streamType + '#loggedin'] = activity;
+                if (!route.transient) {
+                  activityStreamId = ActivityUtil.createActivityStreamId(
+                    route.resourceId,
+                    route.streamType + '#loggedin'
+                  );
+                  allDeliveredActivities[activityStreamId] = activity;
+                }
+              }
+
+              // If a group is involved in a loggedin activity we route the activity to the group's loggedin activity stream
+              const loggedinGroupEntity = _getGroupEntity(actor, object, target);
+              if (loggedinGroupEntity) {
+                allRoutedActivities[loggedinGroupEntity.id] = allRoutedActivities[loggedinGroupEntity.id] || {};
+                allRoutedActivities[loggedinGroupEntity.id][route.streamType + '#loggedin'] = activity;
+
+                if (!route.transient) {
+                  activityStreamId = ActivityUtil.createActivityStreamId(
+                    loggedinGroupEntity.id,
+                    route.streamType + '#loggedin'
+                  );
+                  allDeliveredActivities[activityStreamId] = activity;
+                }
+              }
+            }
+          }
+        });
+
+        log().trace({ activitySeed, allRoutedActivities }, 'Finished routed activities');
+
+        // Queue the activity entities to be collected and aggregated
+        _queueActivities(activitySeed, allDeliveredActivities, err => {
+          if (err) {
+            reject(err);
+            // return callback(err);
+          }
+
+          // Emit an event for the routed activities
+          ActivityEmitter.emit(ActivityConstants.events.ROUTED_ACTIVITIES, allRoutedActivities);
+
+          // The number of activities that were handled
+          Telemetry.incr('count');
+
+          // How many routed activities are created and how long it took
+          Telemetry.incr('routed.count', _.values(allDeliveredActivities).length);
+          Telemetry.appendDuration('routing.time', routingStartTime);
+          // return callback();
+          resolve();
+        });
       });
     });
+  }).catch(error => {
+    throw error;
   });
 };
 

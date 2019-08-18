@@ -67,19 +67,16 @@ describe('Search', () => {
    *
    * @param  {Function}   callback    Standard callback function
    */
-  const _purgeAndEnable = function(callback) {
+  const _purgeAndEnable = async function() {
     // Purge anything that is hanging around in the preview processing queues
-    PreviewTestUtil.purgePreviewsQueue(() => {
-      PreviewTestUtil.purgeRegeneratePreviewsQueue(() => {
-        PreviewTestUtil.purgeFoldersPreviewsQueue(() => {
-          // Enable the Preview Processor
-          PreviewAPI.enable(err => {
-            assert.ok(!err);
+    await PreviewTestUtil.purgePreviewsQueue();
+    await PreviewTestUtil.purgeRegeneratePreviewsQueue();
+    await PreviewTestUtil.purgeFoldersPreviewsQueue();
+    // Enable the Preview Processor
+    PreviewAPI.enable(err => {
+      assert.ok(!err);
 
-            return callback();
-          });
-        });
-      });
+      return;
     });
   };
 

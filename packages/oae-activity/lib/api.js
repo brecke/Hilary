@@ -70,15 +70,7 @@ let mailPollingTimer = null;
  * @param  {Function}   [callback]      Invoked when the configuration has been refreshed
  * @param  {Object}     [callback.err]  An error that occurred, if any
  */
-const refreshConfiguration = function(config, callback) {
-  callback =
-    callback ||
-    function(err) {
-      if (err) {
-        log().error({ err }, 'Error refreshing activities configuration');
-      }
-    };
-
+const refreshConfiguration = async function(config) {
   config = ActivitySystemConfig.refreshConfiguration(config);
 
   log().info({ config }, 'Refreshing activity configuration');
@@ -111,20 +103,24 @@ const refreshConfiguration = function(config, callback) {
   if (config.processActivityJobs && !boundWorker) {
     boundWorker = true;
     // Bind directly to the `routeActivity` router method
-    return TaskQueue.bind(
-      ActivityConstants.mq.TASK_ACTIVITY,
-      ActivityRouter.routeActivity,
-      { subscribe: { prefetchCount: config.maxConcurrentRouters } },
-      callback
-    );
+    try {
+      await TaskQueue.bind(ActivityConstants.mq.TASK_ACTIVITY, ActivityRouter.routeActivity, {
+        subscribe: { prefetchCount: config.maxConcurrentRouters }
+      });
+    } catch (error) {
+      throw error;
+    }
   }
 
   if (!config.processActivityJobs && boundWorker) {
     boundWorker = false;
-    return TaskQueue.unbind(ActivityConstants.mq.TASK_ACTIVITY, callback);
-  }
 
-  return callback();
+    try {
+      await TaskQueue.unbind(ActivityConstants.mq.TASK_ACTIVITY);
+    } catch (error) {
+      throw error;
+    }
+  }
 };
 
 /*!

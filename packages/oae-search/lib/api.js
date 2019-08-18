@@ -23,6 +23,7 @@ import * as SearchUtil from 'oae-search/lib/util';
 import { Validator } from 'oae-util/lib/validator';
 import { SearchConstants } from 'oae-search/lib/constants';
 import { SearchResult } from 'oae-search/lib/model';
+import { rejectMessage } from 'oae-util/lib/mq';
 import * as client from './internal/elasticsearch';
 
 const log = logger('oae-search');
@@ -261,7 +262,7 @@ const registerChildSearchDocument = function(name, options, callback) {
  * @param  {Object}     searchConfig    The search configuration object, as per `config.js`
  * @param  {Function}   callback        Standard callback function
  */
-const refreshSearchConfiguration = function(searchConfig, callback) {
+const refreshSearchConfiguration = async function(searchConfig, callback) {
   index = searchConfig.index;
   const processIndexJobs = searchConfig.processIndexJobs !== false;
 
@@ -269,22 +270,28 @@ const refreshSearchConfiguration = function(searchConfig, callback) {
 
   if (processIndexJobs && !boundIndexWorkers) {
     boundIndexWorkers = true;
-    TaskQueue.bind(SearchConstants.mq.TASK_INDEX_DOCUMENT, _handleIndexDocumentTask, null, () => {
-      TaskQueue.bind(SearchConstants.mq.TASK_DELETE_DOCUMENT, _handleDeleteDocumentTask, null, () => {
-        return TaskQueue.bind(SearchConstants.mq.TASK_REINDEX_ALL, _handleReindexAllTask, null, callback);
-      });
-    });
-  } else if (!processIndexJobs && boundIndexWorkers) {
-    boundIndexWorkers = false;
-    TaskQueue.unbind(SearchConstants.mq.TASK_INDEX_DOCUMENT, () => {
-      TaskQueue.unbind(SearchConstants.mq.TASK_DELETE_DOCUMENT, () => {
-        return TaskQueue.unbind(SearchConstants.mq.TASK_REINDEX_ALL, callback);
-      });
-    });
-  } else {
-    // If we get here, there was no state change in handling indexing, so we don't need to do anything.
+    await TaskQueue.bind(SearchConstants.mq.TASK_INDEX_DOCUMENT, _handleIndexDocumentTask, null);
+    //  () => {
+    await TaskQueue.bind(SearchConstants.mq.TASK_DELETE_DOCUMENT, _handleDeleteDocumentTask, null);
+    //  () => {
+    await TaskQueue.bind(SearchConstants.mq.TASK_REINDEX_ALL, _handleReindexAllTask, null);
     return callback();
+    // });
+    // });
   }
+
+  if (!processIndexJobs && boundIndexWorkers) {
+    boundIndexWorkers = false;
+    await TaskQueue.unbind(SearchConstants.mq.TASK_INDEX_DOCUMENT);
+    await TaskQueue.unbind(SearchConstants.mq.TASK_DELETE_DOCUMENT);
+    await TaskQueue.unbind(SearchConstants.mq.TASK_REINDEX_ALL);
+    return callback();
+    // });
+    // });
+  }
+
+  // If we get here, there was no state change in handling indexing, so we don't need to do anything.
+  return callback();
 };
 
 /**
@@ -563,7 +570,8 @@ const _createChildSearchDocumentMapping = function(name, schema, callback) {
  * @param  {Object}     callback.err    An error that occurred, if any
  * @api private
  */
-const _handleReindexAllTask = function(data, callback) {
+const _handleReindexAllTask = function(data) {
+  /*
   callback =
     callback ||
     function(err) {
@@ -571,33 +579,39 @@ const _handleReindexAllTask = function(data, callback) {
         log().error({ err, data }, 'Error handling reindex-all task');
       }
     };
+    */
 
-  if (_.isEmpty(reindexAllHandlers)) {
-    return callback();
-  }
+  return new Promise((resolve, reject) => {
+    if (_.isEmpty(reindexAllHandlers)) {
+      resolve();
+      // return callback();
+    }
 
-  // Invoke all handlers and return to the caller when they have all completed (or we get an error)
-  let numToProcess = _.keys(reindexAllHandlers).length;
-  let complete = false;
-  // eslint-disable-next-line no-unused-vars
-  _.each(reindexAllHandlers, (handler, handlerId) => {
-    handler(err => {
-      if (complete) {
-        // Do nothing, we've already returned to the caller
-        return;
-      }
+    // Invoke all handlers and return to the caller when they have all completed (or we get an error)
+    let numToProcess = _.keys(reindexAllHandlers).length;
+    let complete = false;
+    // eslint-disable-next-line no-unused-vars
+    _.each(reindexAllHandlers, (handler, handlerId) => {
+      handler(err => {
+        if (complete) {
+          // Do nothing, we've already returned to the caller
+          return;
+        }
 
-      if (err) {
-        complete = true;
-        return callback(err);
-      }
+        if (err) {
+          complete = true;
+          reject(err);
+          // return callback(err);
+        }
 
-      numToProcess--;
-      if (numToProcess === 0) {
-        log().info({ handlers: _.keys(reindexAllHandlers) }, 'Finished submitting all items for re-indexing');
-        complete = true;
-        return callback();
-      }
+        numToProcess--;
+        if (numToProcess === 0) {
+          log().info({ handlers: _.keys(reindexAllHandlers) }, 'Finished submitting all items for re-indexing');
+          complete = true;
+          resolve();
+          // return callback();
+        }
+      });
     });
   });
 };
@@ -612,7 +626,8 @@ const _handleReindexAllTask = function(data, callback) {
  * @param  {Object}     callback.err        An error that occurred, if any
  * @api private
  */
-const _handleDeleteDocumentTask = function(data, callback) {
+const _handleDeleteDocumentTask = function(data) {
+  /*
   callback =
     callback ||
     function(err) {
@@ -620,6 +635,7 @@ const _handleDeleteDocumentTask = function(data, callback) {
         log().error({ err, data }, 'Error handling search document delete task.');
       }
     };
+    */
 
   const deletes = [];
 
@@ -660,7 +676,7 @@ const _handleDeleteDocumentTask = function(data, callback) {
   }
 
   // Delete the resource document, plus all its children and any requested children
-  return _deleteAll(deletes, callback);
+  return _deleteAll(deletes);
 };
 
 /**
@@ -674,36 +690,40 @@ const _handleDeleteDocumentTask = function(data, callback) {
  * @param  {Function}   callback                    Standard callback function
  * @api private
  */
-const _deleteAll = function(deletes, callback) {
-  if (_.isEmpty(deletes)) {
-    return callback();
-  }
-
-  const del = deletes.shift();
-
-  /*!
-   * Invoke the _deleteAll method recursively when the requested delete operation has been
-   * performed
-   *
-   * @param  {Object}     err     An error that occurred, if any
-   */
-  const _handleDocumentsDeleted = function(err) {
-    if (err) {
-      log().error({ err, operation: del }, 'Error deleting a document from the search index');
+const _deleteAll = function(deletes) {
+  return new Promise((resolve, reject) => {
+    if (_.isEmpty(deletes)) {
+      // return callback();
+      resolve();
     }
 
-    return _deleteAll(deletes, callback);
-  };
+    const del = deletes.shift();
 
-  // Perform the appropriate delete operations
-  if (del.deleteType === 'id') {
-    return client.del(del.documentType, del.id, _handleDocumentsDeleted);
-  }
+    /*!
+     * Invoke the _deleteAll method recursively when the requested delete operation has been
+     * performed
+     *
+     * @param  {Object}     err     An error that occurred, if any
+     */
+    const _handleDocumentsDeleted = function(err) {
+      if (err) {
+        log().error({ err, operation: del }, 'Error deleting a document from the search index');
+      }
 
-  if (del.deleteType === 'query') {
-    const query = { query: del.query };
-    return client.deleteByQuery(del.documentType, query, null, _handleDocumentsDeleted);
-  }
+      // return _deleteAll(deletes);
+      Promise.resolve(_deleteAll(deletes));
+    };
+
+    // Perform the appropriate delete operations
+    if (del.deleteType === 'id') {
+      return client.del(del.documentType, del.id, _handleDocumentsDeleted);
+    }
+
+    if (del.deleteType === 'query') {
+      const query = { query: del.query };
+      return client.deleteByQuery(del.documentType, query, null, _handleDocumentsDeleted);
+    }
+  });
 };
 
 /**
@@ -715,7 +735,8 @@ const _deleteAll = function(deletes, callback) {
  * @param  {Object}             callback.err    An error that occurred, if any
  * @api private
  */
-const _handleIndexDocumentTask = function(data, callback) {
+const _handleIndexDocumentTask = function(data) {
+  /*
   callback =
     callback ||
     function(err) {
@@ -723,95 +744,103 @@ const _handleIndexDocumentTask = function(data, callback) {
         log().error({ err, data }, 'Error handling search indexing task.');
       }
     };
+    */
 
-  log().trace({ data }, 'Received index document task');
+  return new Promise((resolve, reject) => {
+    log().trace({ data }, 'Received index document task');
 
-  const resourcesToIndex = {};
-  const resourceChildrenToIndex = {};
-  _.each(data.resources, resource => {
-    data.index = data.index || {};
-    data.index.children = data.index.children || {};
+    const resourcesToIndex = {};
+    const resourceChildrenToIndex = {};
+    _.each(data.resources, resource => {
+      data.index = data.index || {};
+      data.index.children = data.index.children || {};
 
-    // If the children property is set to boolean true, it indicates all known child documents for this
-    // resource type should be indexed for the resource
-    if (data.index.children === true) {
-      data.index.children = {};
-      _.each(childSearchDocuments, (options, documentType) => {
-        // Only include this child if it is specified to be a child of this resource type
-        if (!options.resourceTypes || options.resourceTypes[data.resourceType]) {
-          data.index.children[documentType] = true;
-        }
-      });
-    }
+      // If the children property is set to boolean true, it indicates all known child documents for this
+      // resource type should be indexed for the resource
+      if (data.index.children === true) {
+        data.index.children = {};
+        _.each(childSearchDocuments, (options, documentType) => {
+          // Only include this child if it is specified to be a child of this resource type
+          if (!options.resourceTypes || options.resourceTypes[data.resourceType]) {
+            data.index.children[documentType] = true;
+          }
+        });
+      }
 
-    // Keep track of all core resource documents that need to be indexed
-    if (data.index.resource) {
-      resourcesToIndex[data.resourceType] = resourcesToIndex[data.resourceType] || [];
-      resourcesToIndex[data.resourceType].push(resource);
-    }
+      // Keep track of all core resource documents that need to be indexed
+      if (data.index.resource) {
+        resourcesToIndex[data.resourceType] = resourcesToIndex[data.resourceType] || [];
+        resourcesToIndex[data.resourceType].push(resource);
+      }
 
-    // Keep track of all child documents that need to be indexed
-    _.chain(data.index.children)
-      .keys()
-      .each(documentType => {
-        resourceChildrenToIndex[documentType] = resourceChildrenToIndex[documentType] || [];
-        resourceChildrenToIndex[documentType].push(resource);
-      });
-  });
+      // Keep track of all child documents that need to be indexed
+      _.chain(data.index.children)
+        .keys()
+        .each(documentType => {
+          resourceChildrenToIndex[documentType] = resourceChildrenToIndex[documentType] || [];
+          resourceChildrenToIndex[documentType].push(resource);
+        });
+    });
 
-  _produceAllResourceDocuments(resourcesToIndex, (err, resourceDocs) => {
-    if (err) {
-      return callback(err);
-    }
-
-    log().trace({ data, resourceDocs }, 'Produced top-level resource docs');
-
-    _produceAllChildDocuments(resourceChildrenToIndex, (err, childResourceDocs) => {
+    _produceAllResourceDocuments(resourcesToIndex, (err, resourceDocs) => {
       if (err) {
-        return callback(err);
+        reject(err);
+        // return callback(err);
       }
 
-      log().trace({ data, childResourceDocs }, 'Produced child resource docs');
+      log().trace({ data, resourceDocs }, 'Produced top-level resource docs');
 
-      const allDocs = _.union(resourceDocs, childResourceDocs);
-      if (_.isEmpty(allDocs)) {
-        return callback();
-      }
-
-      if (allDocs.length > 1) {
-        const ops = SearchUtil.createBulkIndexOperations(allDocs);
-        client.bulk(ops, err => {
-          if (err) {
-            log().error({ err, ops }, 'Error indexing %s documents', allDocs.length);
-          } else {
-            log().debug('Successfully indexed %s documents', allDocs.length);
-          }
-
-          return callback(err);
-        });
-      } else {
-        const doc = allDocs[0];
-        const { id } = doc;
-        const opts = {};
-
-        if (doc._parent) {
-          opts.parent = doc._parent;
+      _produceAllChildDocuments(resourceChildrenToIndex, (err, childResourceDocs) => {
+        if (err) {
+          reject(err);
+          // return callback(err);
         }
 
-        // These properties go in the request metadata, not the actual document
-        delete doc.id;
-        delete doc._parent;
+        log().trace({ data, childResourceDocs }, 'Produced child resource docs');
 
-        client.runIndex(doc._type, id, doc, opts, err => {
-          if (err) {
-            log().error({ err, id, doc, opts }, 'Error indexing a document');
-          } else {
-            log().debug('Successfully indexed a document');
+        const allDocs = _.union(resourceDocs, childResourceDocs);
+        if (_.isEmpty(allDocs)) {
+          // return callback();
+          resolve();
+        }
+
+        if (allDocs.length > 1) {
+          const ops = SearchUtil.createBulkIndexOperations(allDocs);
+          client.bulk(ops, err => {
+            if (err) {
+              log().error({ err, ops }, 'Error indexing %s documents', allDocs.length);
+            } else {
+              log().debug('Successfully indexed %s documents', allDocs.length);
+            }
+
+            // return callback(err);
+            reject(err);
+          });
+        } else {
+          const doc = allDocs[0];
+          const { id } = doc;
+          const opts = {};
+
+          if (doc._parent) {
+            opts.parent = doc._parent;
           }
 
-          return callback(err);
-        });
-      }
+          // These properties go in the request metadata, not the actual document
+          delete doc.id;
+          delete doc._parent;
+
+          client.runIndex(doc._type, id, doc, opts, err => {
+            if (err) {
+              log().error({ err, id, doc, opts }, 'Error indexing a document');
+            } else {
+              log().debug('Successfully indexed a document');
+            }
+
+            reject(err);
+            // return callback(err);
+          });
+        }
+      });
     });
   });
 };

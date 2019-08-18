@@ -48,7 +48,9 @@ describe('Search API', () => {
        */
       const _handleTaskDrain = function(data, mqCallback) {
         // Simply callback, which acknowledges messages without doing anything.
-        mqCallback();
+        return new Promise((resolve, reject) => {
+          resolve(mqCallback());
+        });
       };
 
       // Drain the queue
@@ -170,8 +172,11 @@ describe('Search API', () => {
        * @see TaskQueue#bind
        */
       const _handleTask = function(data, mqCallback) {
-        mqCallback();
-        callback();
+        return new Promise((resolve, reject) => {
+          return mqCallback();
+        }).then(() => {
+          callback();
+        });
       };
 
       // Bind the handler to invoke the callback when the test passes
@@ -200,8 +205,11 @@ describe('Search API', () => {
        * @see TaskQueue#bind
        */
       const _handleTaskFail = function(data, mqCallback) {
-        mqCallback();
-        assert.fail('Did not expect the task to be invoked.');
+        return new Promise((resolve, reject) => {
+          return mqCallback();
+        }).then(() => {
+          assert.fail('Did not expect the task to be invoked.');
+        });
       };
 
       // Bind a handler to handle the task that invokes an assertion failure, as no task should be triggered from this test

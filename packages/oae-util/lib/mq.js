@@ -137,9 +137,22 @@ OaeEmitter.on('ready', () => {
  * @param  {Boolean} requeue  Whether the message should be requeued
  * @param  {Function} callback Standard callback function
  */
-const rejectMessage = function(message, requeue, callback) {
-  channel.reject(message, requeue);
-  return callback();
+const rejectMessage = function(message, requeue) {
+  return new Promise(resolve => {
+    /*
+    if (rejection) resolve(rejection);
+    else reject(rejection);
+    */
+    console.log('Gonna reject this shit');
+    resolve(channel.nack(message, true, requeue));
+  });
+  /*
+  return Promise.resolve(channel.reject(message, false, requeue)).catch(error => {
+    // TODO
+    log().error(error);
+    throw error;
+  });
+  */
 };
 
 /**
@@ -149,12 +162,13 @@ const rejectMessage = function(message, requeue, callback) {
  * @param  {Function}  callback        Standard callback function
  * @param  {Object}    callback.err    An error that occurred, if any
  */
-const init = function(mqConfig, callback) {
+const init = async function(mqConfig, callback) {
   //  Const taskConfig = mqConfig.tasks || {};
 
   if (connection) {
     log().warn('Attempted to initialize an existing RabbitMQ connector. Ignoring');
-    return _createRedeliveryQueue(callback);
+    const queue = await _createRedeliveryQueue();
+    return callback(null, queue);
   }
 
   log().info('Initializing RabbitMQ connector');
@@ -164,12 +178,30 @@ const init = function(mqConfig, callback) {
   });
 
   const retryTimeout = 5;
-  connection = amqp.connect(arrayOfHostsToConnectTo, {
-    json: true,
-    reconnectTimeInSeconds: retryTimeout
-  });
-  connection.on('disconnect', () => {
+  const establishConnection = () => {
+    return amqp.connect(arrayOfHostsToConnectTo, {
+      json: true,
+      reconnectTimeInSeconds: retryTimeout,
+      heartbeatIntervalInSeconds: 0,
+      connectionOptions: {
+        heartbeat: 0
+      }
+    });
+  };
+
+  connection = establishConnection();
+
+  connection.on('disconnect', err => {
     log().error('Error connecting to rabbitmq, retrying in ' + retryTimeout + 's...');
+    // debug
+    console.log(err);
+    // reconnect
+    /*
+    connection = establishConnection();
+    return _createRedeliveryQueue().then(queue => {
+      return callback(null, queue);
+    });
+    */
   });
 
   // Connect to channel
@@ -200,15 +232,19 @@ const init = function(mqConfig, callback) {
     log().info('Connection to RabbitMQ established.');
     if (!initialized) {
       initialized = true;
-      return _createRedeliveryQueue(callback);
+      return _createRedeliveryQueue().then(queue => {
+        callback(null, queue);
+      });
     }
   });
-
   connection.on('error', err => {
+    // debug
+    console.log('\n!!! Closing this shit!\n');
     log().error({ err }, 'Error in the RabbitMQ connection. Reconnecting.');
   });
-
   connection.on('close', () => {
+    // debug
+    console.log('\n!!! Closing this shit!\n');
     log().warn('Closed connection to RabbitMQ. Reconnecting.');
   });
 };
@@ -219,13 +255,13 @@ const init = function(mqConfig, callback) {
  * @param  {Function}   Invoked when shutdown is complete
  * @api private
  */
-const _destroy = function(callback) {
+const _destroy = function() {
   // Unbind all queues so we don't receive new messages
   log().info('Unbinding all queues for shut down...');
-  _unsubscribeAll(() => {
+  return _unsubscribeAll().then(() => {
     // Give 15 seconds for mq messages to complete processing
     log().info('Waiting until all processing messages complete...');
-    _waitUntilIdle(15000, callback);
+    return _waitUntilIdle(15000);
   });
 };
 
@@ -238,31 +274,55 @@ OAE.registerPreShutdownHandler('mq', null, _destroy);
  * @param  {Object}     exchangeOptions     The options that should be used to declare this exchange. See https://github.com/postwait/node-amqp/#connectionexchangename-options-opencallback for a full list of options
  * @param  {Function}   callback            Standard callback function
  */
-const declareExchange = async function(exchangeName, exchangeOptions, callback) {
+const declareExchange = function(exchangeName, exchangeOptions) {
   if (!exchangeName) {
+    const error = new Error('Tried to declare an exchange without providing an exchange name');
+    error.code = 400;
     log().error({
       exchangeName,
-      err: new Error('Tried to declare an exchange without providing an exchange name')
+      err: error
     });
+    // reject(error);
+    // throw error;
+    return Promise.reject();
+    /*
     return callback({
       code: 400,
       msg: 'Tried to declare an exchange without providing an exchange name'
     });
+    */
   }
 
   if (exchanges[exchangeName]) {
-    log().error({ exchangeName, err: new Error('Tried to declare an exchange twice') });
-    return callback({ code: 400, msg: 'Tried to declare an exchange twice' });
+    const error = new Error('Tried to declare an exchange twice');
+    error.code = 400;
+    log().error({ exchangeName, err: error });
+
+    // reject(error);
+    return Promise.reject();
+    // throw error;
+    // return callback({ code: 400, msg: 'Tried to declare an exchange twice' });
   }
 
-  try {
-    const exchange = await channel.assertExchange(exchangeName, exchangeOptions.type, exchangeOptions);
+  // if the exchange exists already and has properties different to those supplied, the channel will ‘splode
 
-    exchanges[exchangeName] = exchange;
-    return callback();
-  } catch (error) {
-    log().error({ exchangeName, err: new Error('Unable to declare an exchange') });
-  }
+  return channel
+    .assertExchange(exchangeName, exchangeOptions.type, exchangeOptions)
+    .then(() => {
+      exchanges[exchangeName] = exchangeName;
+    })
+    .catch(error => {
+      log().error({ exchangeName, err: new Error('Unable to declare an exchange') });
+      /*
+      return channel.checkExchange(exchangeName);
+    })
+    .then(ok => {
+      console.log('Result of checkExchange: ' + ok);
+    })
+    .catch(error => {
+      log().error({ exchangeName, err: new Error('Unable to check for an exchange') });
+      */
+    });
 };
 
 /**
@@ -272,30 +332,47 @@ const declareExchange = async function(exchangeName, exchangeOptions, callback) 
  * @param  {Object}     queueOptions        The options that should be used to declare this queue. See https://github.com/postwait/node-amqp/#connectionqueuename-options-opencallback for a full list of options
  * @param  {Function}   callback            Standard callback function
  */
-const declareQueue = async function(queueName, queueOptions, callback) {
+const declareQueue = function(queueName, queueOptions) {
   if (!queueName) {
+    const error = new Error('Tried to declare a queue without providing a name');
+    error.code = 400;
     log().error({
       queueName,
       queueOptions,
-      err: new Error('Tried to declare a queue without providing a name')
+      err: error
     });
-    return callback({ code: 400, msg: 'Tried to declare a queue without providing a name' });
+    // throw error;
+    return Promise.reject(error);
+    // return callback({ code: 400, msg: 'Tried to declare a queue without providing a name' });
   }
 
   if (queues[queueName]) {
-    log().error({ queueName, queueOptions, err: new Error('Tried to declare a queue twice') });
-    return callback({ code: 400, msg: 'Tried to declare a queue twice' });
+    const error = new Error('Tried to declare a queue twice');
+    error.code = 400;
+    log().error({ queueName, queueOptions, err: error });
+    return Promise.reject(error);
+    // throw error;
+    // return callback({ code: 400, msg:  });
   }
 
-  try {
-    const queue = await channel.assertQueue(queueName, queueOptions);
+  // debug
+  /*
+  console.log('................................................................................');
+  console.log('Asserting queue ' + queueName);
+  console.dir(queueOptions);
+  console.log();
+  */
 
-    log().info({ queueName }, 'Created/Retrieved a RabbitMQ queue');
-    queues[queueName] = { queue };
-    return callback();
-  } catch (error) {
-    log().error({ queueName, err: new Error('Unable to declare a queue') });
-  }
+  return channel
+    .assertQueue(queueName, queueOptions)
+    .then(queue => {
+      log().info({ queueName }, 'Created/Retrieved a RabbitMQ queue');
+      queues[queueName] = { queue };
+    })
+    .catch(error => {
+      log().error({ queueName, err: new Error('Unable to declare a queue') });
+      return Promise.reject(error);
+    });
 };
 
 /**
@@ -337,43 +414,87 @@ let isWorking = false;
  * A function that will pick RabbitMQ queues of the `queuesToBind` queue and bind them.
  * This function will ensure that at most 1 bind runs at the same time.
  */
-const _processBindQueue = async function() {
-  // If there is something to do and we're not already doing something we can do some work
-  if (queuesToBind.length > 0 && !isWorking) {
-    isWorking = true;
-
-    const todo = queuesToBind.shift();
-    try {
-      await channel.bindQueue(todo.queueName, todo.exchangeName, todo.routingKey);
-
+const singleBindQueue = function(queue) {
+  return channel
+    .bindQueue(queue.queueName, queue.exchangeName, queue.routingKey)
+    .then(() => {
       log().trace(
         {
-          queueName: todo.queueName,
-          exchangeName: todo.exchangeName,
-          routingKey: todo.routingKey
+          queueName: queue.queueName,
+          exchangeName: queue.exchangeName,
+          routingKey: queue.routingKey
         },
         'Bound a queue to an exchange'
       );
-      const doPurge = purgeQueuesOnStartup && !startupPurgeStatus[todo.queueName];
+
+      const doPurge = purgeQueuesOnStartup && !startupPurgeStatus[queue.queueName];
       if (doPurge) {
         // Ensure this queue only gets purged the first time we connect
-        startupPurgeStatus[todo.queueName] = true;
+        startupPurgeStatus[queue.queueName] = true;
 
         // Purge the queue before subscribing the handler to it if we are configured to do so.
-        purge(todo.queueName, todo.callback);
-      } else {
-        todo.callback();
+        return purge(queue.queueName).catch(error => {
+          const err = new Error('Tried purging an unknown queue');
+          err.code = 400;
+          // Promise.reject(error);
+          throw err;
+          // return reject(error);
+        });
       }
-
-      isWorking = false;
-      _processBindQueue();
-    } catch (error) {
+    })
+    .then(() => {
+      // resolve();
+    })
+    .catch(error => {
       log().error({
-        queueName: todo.queueName,
+        queueName: queue.queueName,
         err: new Error('Unable to bind queue to an exchange')
       });
-    }
-  }
+      // return reject(error);
+      return Promise.reject(error);
+    });
+};
+
+const _processBindQueue = function() {
+  // If there is something to do and we're not already doing something we can do some work
+  // if (queuesToBind.length > 0 && !isWorking) {
+  isWorking = true;
+
+  const allBindings = queuesToBind.map(eachQueue => {
+    return singleBindQueue(eachQueue);
+  });
+
+  return allBindings
+    .reduce(function(cur, next) {
+      return cur.then(next);
+    }, Promise.resolve())
+    .then(function() {
+      // all executed
+
+      // set queuesToBind to empty after all have been processed
+      queuesToBind.length = 0;
+      // return _processBindQueue();
+    })
+    .catch(error => {
+      return Promise.reject(error);
+    })
+    .finally(() => {
+      isWorking = false;
+    });
+
+  /*
+      .reduce((p, queue) => {
+        return p.then(() => singleBindQueue(queue));
+      }, Promise.resolve())
+      .then(() => {
+      })
+      .catch(error => {
+        return Promise.reject(error);
+      });
+      */
+  // todo.callback({ code: 400, msg:  });
+  // }
+  // todo.callback();
 };
 
 /**
@@ -386,52 +507,74 @@ const _processBindQueue = async function() {
  * @param  {Function}   callback        Standard callback function
  * @param  {Object}     callback.err    An error that occurred, if any
  */
-const bindQueueToExchange = function(queueName, exchangeName, routingKey, callback) {
+const bindQueueToExchange = function(queueName, exchangeName, routingKey) {
   if (!queues[queueName]) {
+    const error = new Error('Tried to bind a non existing queue to an exchange, have you declared it first?');
+    error.code = 400;
     log().error({
       queueName,
       exchangeName,
       routingKey,
-      err: new Error('Tried to bind a non existing queue to an exchange, have you declared it first?')
+      err: error
     });
+    // throw error;
+    return Promise.reject(error);
+
+    /*
     return callback({
       code: 400,
       msg: 'Tried to bind a non existing queue to an exchange, have you declared it first?'
     });
+    */
   }
 
   if (!exchanges[exchangeName]) {
+    const error = new Error('Tried to bind a queue to a non-existing exchange, have you declared it first?');
+    error.code = 400;
     log().error({
       queueName,
       exchangeName,
       routingKey,
-      err: new Error('Tried to bind a queue to a non-existing exchange, have you declared it first?')
+      err: error
     });
+    return Promise.reject(error);
+    // throw error;
+    /*
     return callback({
       code: 400,
       msg: 'Tried to bind a queue to a non-existing exchange, have you declared it first?'
     });
+    / */
   }
 
   if (!routingKey) {
+    const error = new Error('Tried to bind a queue to an existing exchange without specifying a routing key');
+    error.code = 400;
+
     log().error({
       queueName,
       exchangeName,
       routingKey,
-      err: new Error('Tried to bind a queue to an existing exchange without specifying a routing key')
+      err: error
     });
-    return callback({ code: 400, msg: 'Missing routing key' });
+    return Promise.reject(error);
+
+    // throw error;
+    // return callback({ code: 400, msg: 'Missing routing key' });
   }
 
   const todo = {
     queue: queues[queueName].queue,
     queueName,
     exchangeName,
-    routingKey,
-    callback
+    routingKey
   };
-  queuesToBind.push(todo);
-  _processBindQueue();
+
+  return singleBindQueue(todo)
+    .then(() => {})
+    .catch(error => {
+      return Promise.reject(error);
+    });
 };
 
 /**
@@ -443,47 +586,72 @@ const bindQueueToExchange = function(queueName, exchangeName, routingKey, callba
  * @param  {Function}   callback        Standard callback function
  * @param  {Object}     callback.err    An error that occurred, if any
  */
-const unbindQueueFromExchange = async function(queueName, exchangeName, routingKey, callback) {
+const unbindQueueFromExchange = function(queueName, exchangeName, routingKey) {
   if (!queues[queueName]) {
+    const error = new Error('Tried to unbind a non existing queue from an exchange, have you declared it first?');
     log().error({
       queueName,
       exchangeName,
       routingKey,
-      err: new Error('Tried to unbind a non existing queue from an exchange, have you declared it first?')
+      err: error
     });
+    error.code = 400;
+    return Promise.reject(error);
+    // throw error;
+    /*
     return callback({
       code: 400,
       msg: 'Tried to unbind a non existing queue from an exchange, have you declared it first?'
     });
+  */
   }
 
   if (!exchanges[exchangeName]) {
+    const error = new Error('Tried to unbind a queue from a non-existing exchange, have you declared it first?');
+    error.code = 400;
     log().error({
       queueName,
       exchangeName,
       routingKey,
-      err: new Error('Tried to unbind a queue from a non-existing exchange, have you declared it first?')
+      err: error
     });
+    return Promise.reject(error);
+    // throw error;
+    /*
     return callback({
       code: 400,
       msg: 'Tried to unbind a queue from a non-existing exchange, have you declared it first?'
     });
+    */
   }
 
   if (!routingKey) {
+    const error = new Error('Tried to unbind a queue from an exchange without providing a routingKey');
+    error.code = 400;
     log().error({
       queueName,
       exchangeName,
       routingKey,
-      err: new Error('Tried to unbind a queue from an exchange without providing a routingKey')
+      err: error
     });
-    return callback({ code: 400, msg: 'No routing key was specified' });
+    return Promise.reject(error);
+    // throw error;
+    // return callback({ code: 400, msg: 'No routing key was specified' });
   }
 
   // Queues[queueName].queue.unbind(exchangeName, routingKey);
-  await channel.unbindQueue(queueName, exchangeName, routingKey, {});
-  log().trace({ queueName, exchangeName, routingKey }, 'Unbound a queue from an exchange');
-  callback();
+  return channel
+    .unbindQueue(queueName, exchangeName, routingKey, {})
+    .then(() => {
+      log().trace({ queueName, exchangeName, routingKey }, 'Unbound a queue from an exchange');
+    })
+    .catch(error => {
+      // debug
+      console.log(error);
+      return Promise.reject(error);
+      // throw error;
+    });
+  // callback();
 };
 
 /**
@@ -497,25 +665,21 @@ const unbindQueueFromExchange = async function(queueName, exchangeName, routingK
  * @param  {Function}   callback            Standard callback function
  * @param  {Object}     callback.err        An error that occurred, if any
  */
-const subscribeQueue = function(queueName, subscribeOptions, listener, callback) {
-  callback =
-    callback ||
-    function(err) {
-      if (err) {
-        log().warn({ err, queueName, subscribeOptions }, 'An error occurred while subscribing to a queue');
-      }
-    };
-
+const subscribeQueue = function(queueName, subscribeOptions, listener) {
   if (!queues[queueName]) {
+    const error = new Error('Tried to subscribe to an unknown queue');
+    error.code = 400;
     log().error({
       queueName,
       subscribeOptions,
-      err: new Error('Tried to subscribe to an unknown queue')
+      err: error
     });
-    return callback({ code: 400, msg: 'Tried to subscribe to an unknown queue' });
+    return Promise.reject(error);
+    // throw error;
+    // return callback({ code: 400, msg: 'Tried to subscribe to an unknown queue' });
   }
 
-  channel
+  return channel
     .consume(
       queueName,
       msg => {
@@ -545,98 +709,112 @@ const subscribeQueue = function(queueName, subscribeOptions, listener, callback)
             data
           };
 
-          submit(
+          return submit(
             MqConstants.REDELIVER_EXCHANGE_NAME,
             MqConstants.REDELIVER_QUEUE_NAME,
             redeliveryData,
-            MqConstants.REDELIVER_SUBMIT_OPTIONS,
-            err => {
-              if (err) {
-                log().warn({ err }, 'An error occurred delivering a redelivered message to the redelivery queue');
-              }
-
+            MqConstants.REDELIVER_SUBMIT_OPTIONS
+          )
+            .then(() => {
+              console.log('Resubmitted the fucking message!!!');
+            })
+            .catch(error => {
+              log().warn({ error }, 'An error occurred delivering a redelivered message to the redelivery queue');
+              // TODO throw here?
+              // return Promise.reject(error);
+              // throw error;
+            })
+            .finally(() => {
               MQ.emit('storedRedelivery', queueName, data, headers, deliveryInfo, msg);
-            }
-          );
-
-          return channelWrapper.ack(msg);
+              // debug
+              console.log('RESUBMITTED');
+              channel.ack(msg);
+              console.log('acked the resubmitted!');
+              /*
+            })
+            .then(() => {
+              return delay(10000);
+            })
+            .then(() => {
+              return runListener(listener, {
+                queueName,
+                headers,
+                deliveryInfo,
+                msg,
+                data,
+                subscribeOptions,
+                deliveryKey
+              });
+              */
+            });
         }
 
-        // Indicate that this server has begun processing a new task
-        _incrementProcessingTask(deliveryKey, data, deliveryInfo);
-        MQ.emit('preHandle', queueName, data, headers, deliveryInfo, msg);
+        // debug
+        console.log('Gonna run the listener!');
 
-        try {
-          // Pass the message data to the subscribed listener
-          listener(data, err => {
-            if (err) {
-              log().error(
-                {
-                  err,
-                  queueName,
-                  data
-                },
-                'An error occurred processing a task'
-              );
-            } else {
-              log().trace(
-                {
-                  queueName,
-                  data,
-                  headers,
-                  deliveryInfo
-                },
-                'MQ message has been processed by the listener'
-              );
-            }
-
-            // Acknowledge that we've seen the message.
-            // Note: We can't use queue.shift() as that only acknowledges the last message that the queue handed to us.
-            // This message and the last message are not necessarily the same if the prefetchCount was higher than 1.
-            if (subscribeOptions.ack !== false) {
-              channelWrapper.ack(msg);
-            }
-
-            // Indicate that this server has finished processing the task
-            _decrementProcessingTask(deliveryKey, deliveryInfo);
-            MQ.emit('postHandle', null, queueName, data, headers, deliveryInfo);
-          });
-        } catch (error) {
-          log().error(
-            {
-              err: error,
-              queueName,
-              data
-            },
-            'Exception raised while handling job'
-          );
-
-          // Acknowledge that we've seen the message
-          if (subscribeOptions.ack !== false) {
-            channelWrapper.ack(msg);
-          }
-
-          // Indicate that this server has finished processing the task
-          _decrementProcessingTask(deliveryKey, deliveryInfo);
-          MQ.emit('postHandle', error, queueName, data, headers, deliveryInfo);
-        }
+        return runListener(listener, { queueName, headers, deliveryInfo, msg, data, subscribeOptions, deliveryKey });
       },
       subscribeOptions
     )
-    // eslint-disable-next-line promise/prefer-await-to-then
     .then(ok => {
       if (!ok) {
         log().error({ queueName, err: new Error('Error binding worker for queue') });
-        return unsubscribeQueue(queueName, () => {
-          // Don't overwrite the original error with any binding errors
-          return callback({ code: 500, msg: 'Error binding a worker for queue' });
+        return unsubscribeQueue(queueName).then(() => {
+          const err = new Error('Error binding a worker for queue');
+          err.code = 500;
+          return Promise.reject(err);
         });
       }
 
       // Keep the consumerTag so we can unsubscribe later
       queues[queueName].consumerTag = ok.consumerTag;
-      return callback();
     });
+};
+
+const runListener = (listener, subscription) => {
+  const { data, queueName, headers, deliveryInfo, subscribeOptions, deliveryKey, msg } = subscription;
+  // Indicate that this server has begun processing a new task
+  _incrementProcessingTask(deliveryKey, data, deliveryInfo);
+  MQ.emit('preHandle', queueName, data, headers, deliveryInfo, msg);
+  // Pass the message data to the subscribed listener
+  const params = {};
+  params.error = null;
+  listener(data, err => {
+    if (err) {
+      data.error = err;
+      log().error(
+        {
+          err,
+          queueName,
+          data
+        },
+        'An error occurred processing a task'
+      );
+    } else {
+      log().trace(
+        {
+          queueName,
+          data,
+          headers,
+          deliveryInfo
+        },
+        'MQ message has been processed by the listener'
+      );
+    }
+
+    // Acknowledge that we've seen the message.
+    // Note: We can't use queue.shift() as that only acknowledges the last message that the queue handed to us.
+    // This message and the last message are not necessarily the same if the prefetchCount was higher than 1.
+    if (subscribeOptions.ack !== false) {
+      channel.ack(msg);
+    }
+
+    // Indicate that this server has finished processing the task
+    _decrementProcessingTask(deliveryKey, deliveryInfo);
+    // debug
+    console.log('redelivered? ' + deliveryInfo.redelivered);
+    MQ.emit('postHandle', params.eror, queueName, data, headers, deliveryInfo);
+  });
 };
 
 /**
@@ -646,33 +824,40 @@ const subscribeQueue = function(queueName, subscribeOptions, listener, callback)
  * @param  {Function}  callback        Standard callback function
  * @param  {Object}    callback.err    An error that occurred, if any
  */
-const unsubscribeQueue = async function(queueName, callback) {
+const unsubscribeQueue = function(queueName) {
   let queue = queues[queueName];
   if (!queue || !queue.queue) {
-    log().warn({
-      queueName,
-      err: new Error('Attempted to unbind listener from non-existant job queue. Ignoring')
-    });
-    return callback();
+    const err = new Error('Attempted to unbind listener from non-existant job queue. Ignoring');
+    log().warn({ queueName }, err.message);
+    return Promise.resolve(err);
+    // throw err;
   }
 
   const { consumerTag } = queue;
   queue = queue.queue;
 
-  try {
-    const ok = await channel.cancel(consumerTag);
+  log().info({ queueName }, 'Attempting to unbind a queue');
 
-    delete queues[queueName];
+  return channel
+    .cancel(consumerTag)
+    .then(ok => {
+      delete queues[queueName];
 
-    if (!ok) {
-      log().error({ queueName }, 'An unknown error occurred unsubscribing a queue');
-      return callback({ code: 500, msg: 'An unknown error occurred unsubscribing a queue' });
-    }
+      if (!ok) {
+        const error = new Error('An unknown error occurred unsubscribing a queue');
+        error.code = 500;
+        log().error({ queueName }, error.message);
+        return Promise.reject();
+        // throw error;
+      }
 
-    return callback();
-  } catch (error) {
-    log().error({ queueName, err: new Error('Unable to unsubscribe the queue') });
-  }
+      log().info({ queueName }, 'Successfully unbound a queue');
+    })
+    .catch(error => {
+      // TODO
+      log().error({ queueName }, error.message);
+      return Promise.reject(error);
+    });
 };
 
 /**
@@ -681,26 +866,21 @@ const unsubscribeQueue = async function(queueName, callback) {
  * @param  {Function}   callback    Standard callback function
  * @api private
  */
-const _unsubscribeAll = function(callback) {
+const _unsubscribeAll = async function() {
   let queuesUnbound = 0;
   const queueNames = _.keys(queues);
   if (queueNames.length > 0) {
-    _.each(queueNames, queueName => {
-      log().info({ queueName }, 'Attempting to unbind a queue');
-      unsubscribeQueue(queueName, err => {
-        queuesUnbound++;
+    for (let index = 0; index < queueNames.length; index++) {
+      const eachQueueName = queueNames[index];
+      await unsubscribeQueue(eachQueueName);
+      queuesUnbound++;
+    }
 
-        if (!err) {
-          log().info({ queueName }, 'Successfully unbound a queue');
-        }
-
-        if (queuesUnbound === queueNames.length) {
-          return callback();
-        }
-      });
-    });
-  } else {
-    return callback();
+    if (queuesUnbound !== queueNames.length) {
+      // TODO refactor this!
+      // throw new Error('Didnt unsubscribe all the queues...');
+      return Promise.reject(new Error('Didnt unsubscribe all the queues...'));
+    }
   }
 };
 
@@ -714,41 +894,59 @@ const _unsubscribeAll = function(callback) {
  * @param  {Function}   [callback]                  Invoked when the job has been submitted, note that this does *NOT* guarantee that the message reached the exchange as that is not supported by amqp
  * @param  {Object}     [callback.err]              Standard error object, if any
  */
-const submit = function(exchangeName, routingKey, data, options, callback) {
+const submit = function(exchangeName, routingKey, data, options) {
   options = options || {};
-  callback = callback || function() {};
+  options.mandatory = false;
 
   if (!exchanges[exchangeName]) {
+    const error = new Error('Tried to submit a message to an unknown exchange');
     log().error({
       exchangeName,
       routingKey,
-      err: new Error('Tried to submit a message to an unknown exchange')
+      err: error
     });
-    return callback({ code: 400, msg: 'Tried to submit a message to an unknown exchange' });
+    error.code = 400;
+    return Promise.reject(error);
+    // throw error;
+    // return callback({ code: 400, msg: 'Tried to submit a message to an unknown exchange' });
   }
 
   if (!routingKey) {
+    const error = new Error('Tried to submit a message without specifying a routingKey');
+    error.code = 400;
     log().error({
       exchangeName,
       routingKey,
-      err: new Error('Tried to submit a message without specifying a routingKey')
+      err: error
     });
+    return Promise.reject(error);
+    // throw error;
+    /*
     return callback({
       code: 400,
       msg: 'Tried to submit a message without specifying a routingKey'
     });
+    */
   }
 
   MQ.emit('preSubmit', routingKey);
 
-  channelWrapper.publish(exchangeName, routingKey, data, options, err => {
-    if (err) {
+  // return channelWrapper
+  return Promise.resolve(channelWrapper.publish(exchangeName, routingKey, data, options))
+    .then(() => {
+      log().info({ exchangeName, routingKey, data, options }, 'Submitted a message to an exchange');
+    })
+    .catch(error => {
       log().error({ exchangeName, routingKey, data, options }, 'Failed to submit a message to an exchange');
+      return Promise.reject(error);
+      // throw error;
+    });
+  /*
+  , err => {
+    if (err) {
       return callback(err);
     }
-
-    return callback();
-  });
+    */
 };
 
 /**
@@ -773,26 +971,33 @@ const getBoundQueueNames = function() {
  * @param  {Function}   callback        Standard callback function
  * @api private
  */
-const _waitUntilIdle = function(maxWaitMillis, callback) {
+const delay = t => new Promise(resolve => setTimeout(resolve, t));
+
+const _waitUntilIdle = function(maxWaitMillis) {
   if (numMessagesInProcessing <= 0) {
     log().info('Successfully entered into idle state.');
-    return callback();
+    // return callback();
+    // return new Promise(resolve => setTimeout(resolve, maxWaitMillis));
+    return delay(maxWaitMillis);
   }
 
   /*!
    * Gives at most `maxWaitMillis` time to finish. If it doesn't, we suspect we have leaked messages and
    * output a certain amount of them to the logs for inspection.
    */
-  const forceContinueHandle = setTimeout(() => {
-    _dumpProcessingMessages('Timed out ' + maxWaitMillis + 'ms while waiting for tasks to complete.');
-    MQ.removeListener('idle', callback);
-    return callback();
-  }, maxWaitMillis);
+  const forceContinueHandle = new Promise(resolve =>
+    setTimeout(() => {
+      _dumpProcessingMessages('Timed out ' + maxWaitMillis + 'ms while waiting for tasks to complete.');
+      MQ.removeListener('idle');
+      resolve();
+      // return callback();
+    }, maxWaitMillis)
+  );
 
   MQ.once('idle', () => {
     log().info('Successfully entered into idle state.');
     clearTimeout(forceContinueHandle);
-    return callback();
+    // return callback();
   });
 };
 
@@ -803,36 +1008,34 @@ const _waitUntilIdle = function(maxWaitMillis, callback) {
  * @param  {Function}   [callback]      Standard callback method
  * @param  {Object}     [callback.err]  An error that occurred purging the queue, if any
  */
-const purge = async function(queueName, callback) {
-  callback =
-    callback ||
-    function(err) {
-      if (err) {
-        log().error({ err, queueName }, 'Error purging queue.');
-      }
-    };
-
+const purge = function(queueName) {
   if (!queues[queueName]) {
-    log().error({ queueName, err: new Error('Tried purging an unknown queue') });
-    return callback({ code: 400, msg: 'Tried purging an unknown queue' });
+    const err = new Error('Tried purging an unknown queue');
+    err.code = 400;
+    log().error({ queueName, err });
+    return Promise.reject(err);
   }
 
   log().info({ queueName }, 'Purging queue');
   MQ.emit('prePurge', queueName);
 
-  try {
-    const data = await channel.purgeQueue(queueName);
-    if (!data) {
-      log().error({ queueName }, 'Error purging queue');
-      return callback({ code: 500, msg: 'Error purging queue: ' + queueName });
-    }
+  return channel
+    .purgeQueue(queueName)
+    .then(data => {
+      if (!data) {
+        const err = new Error('Error purging queue: ' + queueName);
+        err.code = 500;
+        log().error({ queueName, err });
+        // throw err;
 
-    MQ.emit('postPurge', queueName, data.messageCount);
+        return Promise.reject(err);
+      }
 
-    return callback();
-  } catch (error) {
-    log().error({ queueName, err: new Error('Unable to purge queue') });
-  }
+      MQ.emit('postPurge', queueName, data.messageCount);
+    })
+    .catch(error => {
+      log().error({ queueName, err: new Error('Unable to purge queue') });
+    });
 };
 
 /**
@@ -843,15 +1046,7 @@ const purge = async function(queueName, callback) {
  * @param  {Function}   [callback]      Standard callback method
  * @param  {Object}     [callback.err]  An error that occurred purging the queue, if any
  */
-const purgeAll = function(callback) {
-  callback =
-    callback ||
-    function(err) {
-      if (err) {
-        log().error({ err }, 'Error purging all known queues.');
-      }
-    };
-
+const purgeAll = function() {
   // Get all the known queues we can purge
   const toPurge = _.keys(queues);
   log().info({ queues: toPurge }, 'Purging all known queues.');
@@ -861,20 +1056,25 @@ const purgeAll = function(callback) {
    *
    * @param  {Object}  err    Standard error object (if any)
    */
-  const doPurge = function(err) {
-    if (err) {
-      return callback(err);
-    }
+  if (_.isEmpty(toPurge)) {
+    // TODO rephrase maybe?
+    // TODO reject instead?
+    throw new Error('Nothing more to purge! Exiting...');
+  }
 
-    if (_.isEmpty(toPurge)) {
-      return callback();
-    }
-
-    return purge(toPurge.pop(), doPurge);
-  };
-
-  // Start purging
-  doPurge();
+  return Promise.all(
+    toPurge.map(eachQueue => {
+      return purge(eachQueue);
+    })
+  )
+    .then(() => {
+      log().info({ queues: toPurge }, 'Purged all known queues. Exiting...');
+    })
+    .catch(error => {
+      // TODO rephrase maybe?
+      // TODO reject instead?
+      console.log('Trouble purging all queues...');
+    });
 };
 
 /**
@@ -884,33 +1084,41 @@ const purgeAll = function(callback) {
  * @param  {Object}     callback.err    An error that occurred, if any
  * @api private
  */
-const _createRedeliveryQueue = function(callback) {
+const _createRedeliveryQueue = function() {
   // Don't declare if we've already declared it on this node
-  if (queues[MqConstants.REDELIVER_QUEUE_NAME]) {
-    return callback();
+  if (!queues[MqConstants.REDELIVER_QUEUE_NAME]) {
+    // Declare an exchange with a queue whose sole purpose is to hold on to messages that were "redelivered". Such
+    // situations include errors while processing or some kind of client error that resulted in the message not
+    // being acknowledged
+    return declareExchange(MqConstants.REDELIVER_EXCHANGE_NAME, MqConstants.REDELIVER_EXCHANGE_OPTIONS)
+      .then(() => {
+        return declareQueue(MqConstants.REDELIVER_QUEUE_NAME, MqConstants.REDELIVER_QUEUE_OPTIONS);
+      })
+      .then(() => {
+        /*
+      , err => {
+        if (err) {
+          return callback(err);
+        }
+        */
+
+        /*
+       , err => {
+         if (err) {
+           return callback(err);
+          }
+          */
+
+        return bindQueueToExchange(
+          MqConstants.REDELIVER_QUEUE_NAME,
+          MqConstants.REDELIVER_EXCHANGE_NAME,
+          MqConstants.REDELIVER_QUEUE_NAME
+        );
+      })
+      .catch(error => {
+        throw error;
+      });
   }
-
-  // Declare an exchange with a queue whose sole purpose is to hold on to messages that were "redelivered". Such
-  // situations include errors while processing or some kind of client error that resulted in the message not
-  // being acknowledged
-  declareExchange(MqConstants.REDELIVER_EXCHANGE_NAME, MqConstants.REDELIVER_EXCHANGE_OPTIONS, err => {
-    if (err) {
-      return callback(err);
-    }
-
-    declareQueue(MqConstants.REDELIVER_QUEUE_NAME, MqConstants.REDELIVER_QUEUE_OPTIONS, err => {
-      if (err) {
-        return callback(err);
-      }
-
-      return bindQueueToExchange(
-        MqConstants.REDELIVER_QUEUE_NAME,
-        MqConstants.REDELIVER_EXCHANGE_NAME,
-        MqConstants.REDELIVER_QUEUE_NAME,
-        callback
-      );
-    });
-  });
 };
 
 /**

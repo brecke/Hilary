@@ -2226,8 +2226,15 @@ describe('Preview processor', () => {
        * @param  {Function}   mqCallback      The function to invoke to acknowledge handling the message
        */
       const _handler = function(data, mqCallback) {
-        mqCallback();
-        return handler(data);
+        return new Promise((resolve, reject) => {
+          mqCallback()
+            .then(() => {
+              return handler(data);
+            })
+            .then(() => {
+              resolve();
+            });
+        });
       };
 
       // Unbind and rebind a process-all handler
@@ -2517,9 +2524,11 @@ describe('Preview processor', () => {
             MQTestUtil.whenTasksEmpty(PreviewConstants.MQ.TASK_GENERATE_PREVIEWS, () => {
               // Bind our own listener that will keep track of content that needs reprocessing (it should always be empty)
               const contentToBeReprocessed = [];
-              const reprocessTracker = function(data, callback) {
-                contentToBeReprocessed.push(data);
-                callback();
+              const reprocessTracker = function(data) {
+                return new Promise((resolve, reject) => {
+                  contentToBeReprocessed.push(data);
+                  resolve();
+                });
               };
 
               TaskQueue.bind(PreviewConstants.MQ.TASK_GENERATE_PREVIEWS, reprocessTracker, null, err => {

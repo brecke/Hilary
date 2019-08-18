@@ -64,14 +64,7 @@ const PreviewProcessorAPI = new EmitterAPI.EventEmitter();
  * @param  {Function}    [callback]      Standard callback method
  * @param  {Object}      [callback.err]  Standard error object (if any)
  */
-const enable = function(callback) {
-  callback =
-    callback ||
-    // eslint-disable-next-line no-unused-vars
-    function(err) {
-      /* Error is logged within the implementation */
-    };
-
+const enable = function() {
   // Set up the message queue and start listenening for preview tasks
   const options = {
     subscribe: {
@@ -82,38 +75,37 @@ const enable = function(callback) {
   // Bind an error listener to the REST methods
   RestUtil.emitter.on('error', _restErrorLister);
 
-  TaskQueue.bind(PreviewConstants.MQ.TASK_GENERATE_PREVIEWS, _handleGeneratePreviewsTask, options, err => {
-    if (err) {
-      log().error({ err }, 'Could not bind to the generate previews queue');
-      return callback(err);
-    }
-
-    log().info('Bound the preview processor to the generate previews task queue');
-
-    TaskQueue.bind(
-      PreviewConstants.MQ.TASK_GENERATE_FOLDER_PREVIEWS,
-      _handleGenerateFolderPreviewsTask,
-      options,
-      err => {
-        if (err) {
-          log().error({ err }, 'Could not bind to the generate folder previews queue');
-          return callback(err);
-        }
-
-        log().info('Bound the preview processor to the generate folder previews task queue');
-
-        TaskQueue.bind(PreviewConstants.MQ.TASK_REGENERATE_PREVIEWS, _handleRegeneratePreviewsTask, null, err => {
-          if (err) {
-            log().error({ err }, 'Could not bind to the regenerate previews queue');
-            return callback(err);
-          }
-
-          log().info('Bound the preview processor to the regenerate previews task queue');
-          return callback();
-        });
-      }
-    );
-  });
+  return TaskQueue.bind(PreviewConstants.MQ.TASK_GENERATE_PREVIEWS, _handleGeneratePreviewsTask, options)
+    .catch(error => {
+      log().error({ err: error }, 'Could not bind to the generate previews queue');
+      throw error;
+    })
+    .then(() => {
+      log().info('Bound the preview processor to the generate previews task queue');
+      return TaskQueue.bind(
+        PreviewConstants.MQ.TASK_GENERATE_FOLDER_PREVIEWS,
+        _handleGenerateFolderPreviewsTask,
+        options
+      );
+    })
+    .catch(error => {
+      log().error({ err: error }, 'Could not bind to the generate folder previews queue');
+      throw error;
+    })
+    .then(() => {
+      log().info('Bound the preview processor to the generate folder previews task queue');
+      return TaskQueue.bind(PreviewConstants.MQ.TASK_REGENERATE_PREVIEWS, _handleRegeneratePreviewsTask, null);
+    })
+    .catch(error => {
+      log().error({ err: error }, 'Could not bind to the regenerate previews queue');
+      throw error;
+    })
+    .then(() => {
+      log().info('Bound the preview processor to the regenerate previews task queue');
+    })
+    .catch(error => {
+      return Promise.reject(error);
+    });
 };
 
 /**
@@ -122,45 +114,39 @@ const enable = function(callback) {
  * @param  {Function}    [callback]      Standard callback method
  * @param  {Object}      [callback.err]  Standard error object (if any)
  */
-const disable = function(callback) {
-  callback =
-    callback ||
-    // eslint-disable-next-line no-unused-vars
-    function(err) {
-      /* Error is logged within the implementation */
-    };
+const disable = function() {
+  return TaskQueue.unbind(PreviewConstants.MQ.TASK_GENERATE_PREVIEWS)
+    .catch(error => {
+      const err = new Error('Could not unbind from the previews queue');
+      log().error({ err: error }, err.message);
+      throw err;
+    })
+    .then(() => {
+      log().info('Unbound the preview processor from the generate previews task queue');
 
-  TaskQueue.unbind(PreviewConstants.MQ.TASK_GENERATE_PREVIEWS, err => {
-    if (err) {
-      log().error({ err }, 'Could not unbind from the previews queue');
-      return callback(err);
-    }
-
-    log().info('Unbound the preview processor from the generate previews task queue');
-
-    TaskQueue.unbind(PreviewConstants.MQ.TASK_GENERATE_FOLDER_PREVIEWS, err => {
-      if (err) {
-        log().error({ err }, 'Could not unbind from the folder previews queue');
-        return callback(err);
-      }
-
+      return TaskQueue.unbind(PreviewConstants.MQ.TASK_GENERATE_FOLDER_PREVIEWS);
+    })
+    .catch(error => {
+      const err = new Error('Could not unbind from the folder previews queue');
+      log().error({ err: error }, err.message);
+      throw err;
+    })
+    .then(() => {
       log().info('Unbound the preview processor from the folder generate previews task queue');
 
-      TaskQueue.unbind(PreviewConstants.MQ.TASK_REGENERATE_PREVIEWS, err => {
-        if (err) {
-          log().error({ err }, 'Could not unbind from the regenerate previews queue');
-          return callback(err);
-        }
+      return TaskQueue.unbind(PreviewConstants.MQ.TASK_REGENERATE_PREVIEWS);
+    })
+    .catch(error => {
+      const err = new Error('Could not unbind from the regenerate previews queue');
+      log().error({ err: error }, err.message);
+      throw err;
+    })
+    .then(() => {
+      log().info('Unbound the preview processor from the regenerate previews task queue');
 
-        log().info('Unbound the preview processor from the regenerate previews task queue');
-
-        // Remove our REST error listener
-        RestUtil.emitter.removeListener('error', _restErrorLister);
-
-        return callback();
-      });
+      // Remove our REST error listener
+      RestUtil.emitter.removeListener('error', _restErrorLister);
     });
-  });
 };
 
 /**
@@ -179,33 +165,36 @@ const _restErrorLister = function(err) {
  * @param  {Object}     config      The main configuration object as defined in `config.js`. The full config object should be passed in.
  * @param  {Function}   callback    Standard callback function
  */
-const refreshPreviewConfiguration = function(_config, callback) {
+const refreshPreviewConfiguration = function(_config) {
   // Stop listening for tasks.
-  disable(err => {
-    if (err) {
-      return callback(err);
-    }
+  return disable()
+    .then(() => {
+      // Store this configuration.
+      config = _config;
 
-    // Store this configuration.
-    config = _config;
+      if (config.previews.enabled) {
+        _initializeDefaultProcessors(err => {
+          if (err) {
+            // return callback(err);
+            // TODO
+            throw new Error('ERROR!');
+          }
 
-    if (config.previews.enabled) {
-      _initializeDefaultProcessors(err => {
-        if (err) {
-          return callback(err);
-        }
+          // Register the processors.
+          _registerDefaultProcessors();
 
-        // Register the processors.
-        _registerDefaultProcessors();
-
-        // Start listening for messages by enabling it.
-        enable(callback);
-      });
-    } else {
-      // Nothing to do when the PP is disabled.
-      callback();
-    }
-  });
+          // Start listening for messages by enabling it.
+          return enable();
+        });
+      }
+    })
+    .catch(error => {
+      // debug
+      console.dir(error);
+      return Promise.reject(error);
+      // throw error;
+      // return callback(error);
+    });
 };
 
 /**
@@ -431,7 +420,8 @@ const reprocessPreview = function(ctx, contentId, revisionId, callback) {
  * @param  {Object}     callback.err        An error that occurred, if any
  * @api private
  */
-const _handleGenerateFolderPreviewsTask = function(data, callback) {
+const _handleGenerateFolderPreviewsTask = function(data) {
+  /*
   callback =
     callback ||
     function(err) {
@@ -439,30 +429,36 @@ const _handleGenerateFolderPreviewsTask = function(data, callback) {
         log().error({ err, data }, 'Error handling folder preview generation');
       }
     };
+    */
 
-  if (!data.folderId) {
-    log().error(
-      { data },
-      'An invalid generate folder previews task was submitted to the generate folder previews task queue'
-    );
-    return callback({
-      code: 400,
-      msg: 'An invalid generate folder previews task was submitted to the generate folder previews task queue'
-    });
-  }
-
-  log().info({ folderId: data.folderId }, 'Starting preview folder generation process');
-  FolderProcessor.generatePreviews(data.folderId, err => {
-    if (err) {
-      log().error({ err, folderId: data.folderId }, 'Error when trying to process a folder');
-      Telemetry.incr('error.count');
-      return callback(err);
+  return new Promise((resolve, reject) => {
+    if (!data.folderId) {
+      log().error(
+        { data },
+        'An invalid generate folder previews task was submitted to the generate folder previews task queue'
+      );
+      const error = new Error(
+        'An invalid generate folder previews task was submitted to the generate folder previews task queue'
+      );
+      error.code = 400;
+      reject(error);
     }
 
-    // We're done.
-    log().info({ folderId: data.folderId }, 'Folder preview processing done');
-    Telemetry.incr('ok.count');
-    return callback();
+    log().info({ folderId: data.folderId }, 'Starting preview folder generation process');
+    FolderProcessor.generatePreviews(data.folderId, err => {
+      if (err) {
+        log().error({ err, folderId: data.folderId }, 'Error when trying to process a folder');
+        Telemetry.incr('error.count');
+        reject(err);
+        // return callback(err);
+      }
+
+      // We're done.
+      log().info({ folderId: data.folderId }, 'Folder preview processing done');
+      Telemetry.incr('ok.count');
+      resolve();
+      // return callback();
+    });
   });
 };
 
@@ -477,7 +473,8 @@ const _handleGenerateFolderPreviewsTask = function(data, callback) {
  * @param  {Object}     callback.err        An error that occurred, if any
  * @api private
  */
-const _handleGeneratePreviewsTask = function(data, callback) {
+const _handleGeneratePreviewsTask = function(data) {
+  /*
   callback =
     callback ||
     function(err) {
@@ -485,51 +482,61 @@ const _handleGeneratePreviewsTask = function(data, callback) {
         log().error({ err, data }, 'Error handling preview generation');
       }
     };
-
-  if (!data.contentId) {
-    log().error({ data }, 'An invalid generate previews task was submitted to the generate previews task queue');
-    return callback({
-      code: 400,
-      msg: 'An invalid generate previews task was submitted to the generate previews task queue'
-    });
-  }
-
-  const start = Date.now();
-  log().info({ contentId: data.contentId, data }, 'Starting preview generation process');
-  const ctx = new PreviewContext(config, data.contentId, data.revisionId);
-
-  // Generate a context for this preview process and login to the tenant of this content item and start processing
-  ctx.login(err => {
-    if (err) {
-      // If we can't login, we cannot call cleanCallback as we won't have a session cookie
-      // to set a status
-      ctx.cleanup();
-      Telemetry.appendDuration('process.time', start);
-      Telemetry.incr('error.count');
-      return callback(err);
+    */
+  return new Promise((resolve, reject) => {
+    if (!data.contentId) {
+      log().error({ data }, 'An invalid generate previews task was submitted to the generate previews task queue');
+      const error = new Error('An invalid generate previews task was submitted to the generate previews task queue');
+      error.code = 400;
+      reject(error);
     }
 
-    // Get the content and revision profile
-    ctx.getContentData(err => {
-      if (err) {
-        return ctx.setStatus('error', callback);
-      }
+    const start = Date.now();
+    log().info({ contentId: data.contentId, data }, 'Starting preview generation process');
+    const ctx = new PreviewContext(config, data.contentId, data.revisionId);
 
-      // Generate the actual preview images
-      _generatePreviews(ctx, err => {
+    // Generate a context for this preview process and login to the tenant of this content item and start processing
+    ctx.login(err => {
+      if (err) {
+        // If we can't login, we cannot call cleanCallback as we won't have a session cookie
+        // to set a status
         ctx.cleanup();
         Telemetry.appendDuration('process.time', start);
-        PreviewProcessorAPI.emit(PreviewConstants.EVENTS.PREVIEWS_FINISHED, ctx.content, ctx.revision, ctx.getStatus());
+        Telemetry.incr('error.count');
+        reject(err);
+      }
+
+      // Get the content and revision profile
+      ctx.getContentData(err => {
         if (err) {
-          log().error({ err, contentId: data.contentId }, 'Error when trying to process this file');
-          Telemetry.incr('error.count');
-          return callback(err);
+          reject(err);
+          // TODO what the fuck?
+          // return ctx.setStatus('error', callback);
         }
 
-        // We're done.
-        log().info({ contentId: data.contentId }, 'Preview processing done');
-        Telemetry.incr('ok.count');
-        return callback();
+        // Generate the actual preview images
+        _generatePreviews(ctx, err => {
+          ctx.cleanup();
+          Telemetry.appendDuration('process.time', start);
+          PreviewProcessorAPI.emit(
+            PreviewConstants.EVENTS.PREVIEWS_FINISHED,
+            ctx.content,
+            ctx.revision,
+            ctx.getStatus()
+          );
+          if (err) {
+            log().error({ err, contentId: data.contentId }, 'Error when trying to process this file');
+            Telemetry.incr('error.count');
+            reject(err);
+            // return callback(err);
+          }
+
+          // We're done.
+          log().info({ contentId: data.contentId }, 'Preview processing done');
+          Telemetry.incr('ok.count');
+          resolve();
+          // return callback();
+        });
       });
     });
   });
@@ -579,7 +586,8 @@ const _generatePreviews = function(ctx, callback) {
  * @param  {Object}     callback.err    An error that occurred, if any
  * @api private
  */
-const _handleRegeneratePreviewsTask = function(data, callback) {
+const _handleRegeneratePreviewsTask = function(data) {
+  /*
   callback =
     callback ||
     function(err) {
@@ -587,131 +595,138 @@ const _handleRegeneratePreviewsTask = function(data, callback) {
         log().error({ err }, 'Error reprocessing all previews');
       }
     };
+    */
 
-  if (!data.filters) {
-    log().error({ data }, 'An invalid regenerate previews task was submitted to the regenerate previews task queue');
-    return callback({
-      code: 400,
-      msg: 'An invalid regenerate previews task was submitted to the regenerate previews task queue'
-    });
-  }
+  return new Promise((resolve, reject) => {
+    if (!data.filters) {
+      log().error({ data }, 'An invalid regenerate previews task was submitted to the regenerate previews task queue');
+      const error = new Error(
+        'An invalid regenerate previews task was submitted to the regenerate previews task queue'
+      );
+      error.code = 400;
+      reject(error);
+    }
 
-  const filterGenerator = new FilterGenerator(data.filters);
+    const filterGenerator = new FilterGenerator(data.filters);
 
-  // This can strictly not happen as we shouldn't be submitting invalid filters on the queue
-  // but we should check it in case something happened in-transport
-  if (filterGenerator.hasErrors()) {
-    log().error(
-      { data, errors: filterGenerator.getErrors() },
-      'An invalid regenerate previews task was submitted to the regenerate previews task queue'
-    );
-    return callback({
-      code: 400,
-      msg: 'An invalid regenerate previews task was submitted to the regenerate previews task queue'
-    });
-  }
+    // This can strictly not happen as we shouldn't be submitting invalid filters on the queue
+    // but we should check it in case something happened in-transport
+    if (filterGenerator.hasErrors()) {
+      log().error(
+        { data, errors: filterGenerator.getErrors() },
+        'An invalid regenerate previews task was submitted to the regenerate previews task queue'
+      );
+      const error = new Error(
+        'An invalid regenerate previews task was submitted to the regenerate previews task queue'
+      );
+      error.code = 400;
+      reject(error);
+    }
 
-  log().info({ filters: data.filters }, 'Starting reprocessing task');
+    log().info({ filters: data.filters }, 'Starting reprocessing task');
 
-  // Track status of processing
-  const start = Date.now();
-  let totalScanned = 0;
-  let totalReprocessed = 0;
+    // Track status of processing
+    const start = Date.now();
+    let totalScanned = 0;
+    let totalReprocessed = 0;
 
-  /*!
-   * Handles each batch from the ContentDAO.Content.iterateAll method.
-   *
-   * @see ContentDAO.Content#iterateAll
-   * @api private
-   */
-  const _onEach = function(contentRows, done) {
-    log().info('Scanning %d content items to see if previews need to be reprocessed', contentRows.length);
-    totalScanned += contentRows.length;
+    /*!
+     * Handles each batch from the ContentDAO.Content.iterateAll method.
+     *
+     * @see ContentDAO.Content#iterateAll
+     * @api private
+     */
+    const _onEach = function(contentRows, done) {
+      log().info('Scanning %d content items to see if previews need to be reprocessed', contentRows.length);
+      totalScanned += contentRows.length;
 
-    // Get those rows we can use to filter upon
-    const contentToFilter = _.filter(contentRows, contentRow => {
-      if (contentRow.previews) {
-        try {
-          contentRow.previews = JSON.parse(contentRow.previews);
-          return true;
-        } catch (error) {
-          // If the preview is invalid JSON, something bad happened. Lets try and reprocess it so the processor can better set the preview data
-          log().warn({ contentRow }, 'Found invalid JSON for content item. Forcing regeneration of previews');
+      // Get those rows we can use to filter upon
+      const contentToFilter = _.filter(contentRows, contentRow => {
+        if (contentRow.previews) {
+          try {
+            contentRow.previews = JSON.parse(contentRow.previews);
+            return true;
+          } catch (error) {
+            // If the preview is invalid JSON, something bad happened. Lets try and reprocess it so the processor can better set the preview data
+            log().warn({ contentRow }, 'Found invalid JSON for content item. Forcing regeneration of previews');
+          }
+        } else {
+          // If there is no previews object, something is wrong. Try and reprocess it and reset it
+          log().warn(
+            { contentId: contentRow.contentId },
+            'Found no previews object for content item. Forcing regeneration of previews'
+          );
         }
-      } else {
-        // If there is no previews object, something is wrong. Try and reprocess it and reset it
-        log().warn(
-          { contentId: contentRow.contentId },
-          'Found no previews object for content item. Forcing regeneration of previews'
-        );
-      }
 
-      // If we reach this point, it means the previews object was in an incorrect state
-      // so we can't use it for filtering. We should reprocess this piece of content immediately
-      totalReprocessed++;
-      submitForProcessing(contentRow.contentId, contentRow.latestRevisionId);
-      return false;
-    });
-
-    // 1st phase: filter based on content types
-    let filteredContent = filterGenerator.filterContent(contentToFilter);
-
-    // If we don't need to filter by revisions we can simply reprocess the latest revisions
-    // of the content items that are left
-    if (!filterGenerator.needsRevisions() || _.isEmpty(filteredContent)) {
-      _.each(filteredContent, content => {
+        // If we reach this point, it means the previews object was in an incorrect state
+        // so we can't use it for filtering. We should reprocess this piece of content immediately
         totalReprocessed++;
-        submitForProcessing(content.contentId, content.latestRevisionId);
+        submitForProcessing(contentRow.contentId, contentRow.latestRevisionId);
+        return false;
       });
-      return done();
-    }
 
-    // We need to filter by revisions
-    const contentIds = _.map(filteredContent, contentObj => {
-      return contentObj.contentId;
-    });
-    ContentDAO.Revisions.getAllRevisionsForContent(contentIds, (err, revisionsByContent) => {
-      if (err) {
-        log().error({ err }, 'Error trying to retrieve revisions for content');
+      // 1st phase: filter based on content types
+      let filteredContent = filterGenerator.filterContent(contentToFilter);
+
+      // If we don't need to filter by revisions we can simply reprocess the latest revisions
+      // of the content items that are left
+      if (!filterGenerator.needsRevisions() || _.isEmpty(filteredContent)) {
+        _.each(filteredContent, content => {
+          totalReprocessed++;
+          submitForProcessing(content.contentId, content.latestRevisionId);
+        });
+        return done();
       }
 
-      // Stick the revisions on their content item
-      const filteredContentById = _.indexBy(filteredContent, 'contentId');
-      _.each(revisionsByContent, (revisions, contentId) => {
-        filteredContentById[contentId].revisions = revisions;
+      // We need to filter by revisions
+      const contentIds = _.map(filteredContent, contentObj => {
+        return contentObj.contentId;
       });
-      filteredContent = _.values(filteredContentById);
+      ContentDAO.Revisions.getAllRevisionsForContent(contentIds, (err, revisionsByContent) => {
+        if (err) {
+          log().error({ err }, 'Error trying to retrieve revisions for content');
+        }
 
-      // Run the second filtering phase
-      filteredContent = filterGenerator.filterRevisions(filteredContent);
-
-      // Submit all those are left
-      _.each(filteredContent, content => {
-        _.each(content.revisions, revision => {
-          totalReprocessed++;
-          submitForProcessing(content.contentId, revision.revisionId);
+        // Stick the revisions on their content item
+        const filteredContentById = _.indexBy(filteredContent, 'contentId');
+        _.each(revisionsByContent, (revisions, contentId) => {
+          filteredContentById[contentId].revisions = revisions;
         });
+        filteredContent = _.values(filteredContentById);
+
+        // Run the second filtering phase
+        filteredContent = filterGenerator.filterRevisions(filteredContent);
+
+        // Submit all those are left
+        _.each(filteredContent, content => {
+          _.each(content.revisions, revision => {
+            totalReprocessed++;
+            submitForProcessing(content.contentId, revision.revisionId);
+          });
+        });
+
+        return done();
       });
+    };
 
-      return done();
+    ContentDAO.Content.iterateAll(filterGenerator.getContentColumnNames(), 1000, _onEach, err => {
+      if (err) {
+        log().error({ err }, 'Error scanning content items for preview reprocessing');
+        reject(err);
+        // return callback(err);
+      }
+
+      log().info(
+        {
+          timeElapsed: Date.now() - start,
+          totalScanned,
+          totalReprocessed
+        },
+        'Finished scanning content items for reprocessing'
+      );
+      resolve();
+      // return callback();
     });
-  };
-
-  ContentDAO.Content.iterateAll(filterGenerator.getContentColumnNames(), 1000, _onEach, err => {
-    if (err) {
-      log().error({ err }, 'Error scanning content items for preview reprocessing');
-      return callback(err);
-    }
-
-    log().info(
-      {
-        timeElapsed: Date.now() - start,
-        totalScanned,
-        totalReprocessed
-      },
-      'Finished scanning content items for reprocessing'
-    );
-    return callback();
   });
 };
 

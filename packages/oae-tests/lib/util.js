@@ -1286,19 +1286,21 @@ const setUpBeforeTests = function(config, dropKeyspaceBeforeTest, callback) {
                 }
 
                 // Set up a couple of test tenants
-                setUpTenants(err => {
+                setUpTenants(async err => {
                   if (err) {
                     return callback(new Error(err.msg));
                   }
 
                   log().info('Disabling the preview processor during tests');
-                  PreviewAPI.disable(err => {
-                    if (err) {
-                      return callback(new Error(err.msg));
-                    }
+                  await PreviewAPI.disable();
+                  /*
+                    err => {
+                      if (err) {
+                        return callback(new Error(err.msg));
+                      }
+                      */
 
-                    return callback();
-                  });
+                  return callback();
                 });
               });
             });
@@ -1321,22 +1323,25 @@ const setUpBeforeTests = function(config, dropKeyspaceBeforeTest, callback) {
  *
  * @param  {Function}    callback    Standard callback function
  */
-const cleanUpAfterTests = function(callback) {
+const cleanUpAfterTests = function() {
   // Clean up after ourselves
-  Redis.flush(err => {
-    if (err) {
-      log().error({ err }, 'Error flushing Redis data after test completion');
-    }
-
-    // Purge all the task queues
-    MQ.purgeAll(err => {
-      if (err) {
-        log().error({ err }, 'Error purging the RabbitMQ queues');
-      }
-
-      return callback();
+  return Redis.promiseToFlush()
+    .catch(error => {
+      const err = new Error('Error flushing Redis data after test completion');
+      log().error({ err: error }, err.message);
+      // throw err;
+      return Promise.reject(err);
+    })
+    .then(() => {
+      // Purge all the task queues
+      return MQ.purgeAll();
+    })
+    .catch(error => {
+      const err = new Error('Error purging the RabbitMQ queues');
+      log().error({ err: error }, err.message);
+      // throw err;
+      return Promise.reject(err);
     });
-  });
 };
 
 /*

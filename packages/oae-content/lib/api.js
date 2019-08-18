@@ -876,7 +876,9 @@ const _addContentItemToFolders = function(ctx, content, folders, callback) {
  * @param  {Function}   callback            Standard callback function
  * @param  {Object}     callback.err        An error that occurred, if any
  */
-const handlePublish = function(data, callback) {
+const handlePublish = function(data) {
+  return new Promise((resolve, reject) => {
+    /*
   callback =
     callback ||
     function(err) {
@@ -884,94 +886,106 @@ const handlePublish = function(data, callback) {
         log().error({ err, data }, 'Error handling etherpad edit');
       }
     };
+    */
 
-  log().trace({ data }, 'Got an etherpad edit');
+    log().trace({ data }, 'Got an etherpad edit');
 
-  PrincipalsDAO.getPrincipal(data.userId, (err, user) => {
-    if (err) {
-      return callback(err);
-    }
-
-    const ctx = new Context(user.tenant, user);
-
-    ContentDAO.Content.getContent(data.contentId, (err, contentObj) => {
+    PrincipalsDAO.getPrincipal(data.userId, (err, user) => {
       if (err) {
-        return callback(err);
+        // return callback(err);
+        reject(err);
       }
 
-      // Get the latest html from etherpad
-      Etherpad.getHTML(contentObj.id, contentObj.etherpadPadId, (err, html) => {
+      const ctx = new Context(user.tenant, user);
+
+      ContentDAO.Content.getContent(data.contentId, (err, contentObj) => {
         if (err) {
-          return callback(err);
+          reject(err);
+          // return callback(err);
         }
 
-        // Get the latest OAE revision and compare the html that in Etherpad.
-        // We only need to create a new revision if there is an actual update
-        ContentDAO.Revisions.getRevision(contentObj.latestRevisionId, (err, revision) => {
+        // Get the latest html from etherpad
+        Etherpad.getHTML(contentObj.id, contentObj.etherpadPadId, (err, html) => {
           if (err) {
-            return callback(err);
+            reject(err);
+            // return callback(err);
           }
 
-          if (
-            Etherpad.isContentEqual(revision.etherpadHtml, html) ||
-            (!revision.etherpadHtml && Etherpad.isContentEmpty(html))
-          ) {
-            // This situation can occur if 2 users were editting a collaborative document together, one of them leaves,
-            // the other one keeps idling (but doesn't make further chances) for a while and then leaves as well. There is no
-            // need to generate another revision as we already have one with the latest HTML. We do however raise an
-            // event so we can generate an "edited document"-activity for this user as well
-            emitter.emit(ContentConstants.events.EDITED_COLLABDOC, ctx, contentObj);
-            return callback();
-          }
-
-          // Otherwise we create a new revision
-          const newRevisionId = _generateRevisionId(contentObj.id);
-          ContentDAO.Revisions.createRevision(
-            newRevisionId,
-            contentObj.id,
-            data.userId,
-            { etherpadHtml: html },
-            (err, revision) => {
-              if (err) {
-                log().error(
-                  { err, contentId: contentObj.id },
-                  'Could not create a revision for this collaborative document'
-                );
-                return callback({
-                  code: 500,
-                  msg: 'Could not create a revision for this collaborative document'
-                });
-              }
-
-              // Update the content so we can easily retrieve it.
-              // This will also bump the collab doc to the top of the library lists
-              ContentDAO.Content.updateContent(
-                contentObj,
-                { latestRevisionId: revision.revisionId },
-                true,
-                (err, newContentObj) => {
-                  if (err) {
-                    log().error(
-                      { err, contentId: contentObj.id },
-                      'Could not update the main Content CF this collaborative document'
-                    );
-                    return callback({
-                      code: 500,
-                      msg: 'Could not update this collaborative document'
-                    });
-                  }
-
-                  // Add the revision on the content object so the UI doesn't have to
-                  // do another request to get the HTML
-                  newContentObj.latestRevision = revision;
-
-                  // Emit an event for activities and preview processing
-                  emitter.emit(ContentConstants.events.UPDATED_CONTENT_BODY, ctx, newContentObj, contentObj, revision);
-                  return callback();
-                }
-              );
+          // Get the latest OAE revision and compare the html that in Etherpad.
+          // We only need to create a new revision if there is an actual update
+          ContentDAO.Revisions.getRevision(contentObj.latestRevisionId, (err, revision) => {
+            if (err) {
+              reject(err);
+              // return callback(err);
             }
-          );
+
+            if (
+              Etherpad.isContentEqual(revision.etherpadHtml, html) ||
+              (!revision.etherpadHtml && Etherpad.isContentEmpty(html))
+            ) {
+              // This situation can occur if 2 users were editting a collaborative document together, one of them leaves,
+              // the other one keeps idling (but doesn't make further chances) for a while and then leaves as well. There is no
+              // need to generate another revision as we already have one with the latest HTML. We do however raise an
+              // event so we can generate an "edited document"-activity for this user as well
+              emitter.emit(ContentConstants.events.EDITED_COLLABDOC, ctx, contentObj);
+              // return callback();
+              resolve();
+            }
+
+            // Otherwise we create a new revision
+            const newRevisionId = _generateRevisionId(contentObj.id);
+            ContentDAO.Revisions.createRevision(
+              newRevisionId,
+              contentObj.id,
+              data.userId,
+              { etherpadHtml: html },
+              (err, revision) => {
+                if (err) {
+                  log().error(
+                    { err, contentId: contentObj.id },
+                    'Could not create a revision for this collaborative document'
+                  );
+                  const error = new Error('Could not create a revision for this collaborative document');
+                  error.code = 500;
+                  reject(error);
+                }
+
+                // Update the content so we can easily retrieve it.
+                // This will also bump the collab doc to the top of the library lists
+                ContentDAO.Content.updateContent(
+                  contentObj,
+                  { latestRevisionId: revision.revisionId },
+                  true,
+                  (err, newContentObj) => {
+                    if (err) {
+                      log().error(
+                        { err, contentId: contentObj.id },
+                        'Could not update the main Content CF this collaborative document'
+                      );
+                      const error = new Error('Could not update this collaborative document');
+                      error.code = 500;
+                      reject(error);
+                    }
+
+                    // Add the revision on the content object so the UI doesn't have to
+                    // do another request to get the HTML
+                    newContentObj.latestRevision = revision;
+
+                    // Emit an event for activities and preview processing
+                    emitter.emit(
+                      ContentConstants.events.UPDATED_CONTENT_BODY,
+                      ctx,
+                      newContentObj,
+                      contentObj,
+                      revision
+                    );
+                    // return callback();
+                    resolve();
+                  }
+                );
+              }
+            );
+          });
         });
       });
     });
@@ -999,7 +1013,8 @@ const handlePublish = function(data, callback) {
  * @param  {Function}   callback            Standard callback function
  * @param  {Object}     callback.err        An error that occurred, if any
  */
-const ethercalcPublish = function(data, callback) {
+const ethercalcPublish = function(data) {
+  /*
   callback =
     callback ||
     function(err) {
@@ -1007,140 +1022,151 @@ const ethercalcPublish = function(data, callback) {
         log().error({ err, data }, 'Error handling ethercalc edit');
       }
     };
+    */
+  return new Promise((resolve, reject) => {
+    ContentDAO.Ethercalc.hasUserEditedSpreadsheet(data.contentId, data.userId, function(err, hasEdited) {
+      if (err) reject(err);
 
-  ContentDAO.Ethercalc.hasUserEditedSpreadsheet(data.contentId, data.userId, function(err, hasEdited) {
-    if (err) callback(err);
-
-    if (!hasEdited) {
-      // No edits have been made
-      return callback();
-    }
-
-    log().trace({ data }, 'Got an ethercalc edit');
-    ContentDAO.Content.getContent(data.contentId, function(err, contentObj) {
-      if (err) {
-        return callback(err);
+      if (!hasEdited) {
+        // No edits have been made
+        // return callback();
+        resolve();
       }
 
-      const roomId = contentObj.ethercalcRoomId;
-      PrincipalsDAO.getPrincipal(data.userId, function(err, principal) {
+      log().trace({ data }, 'Got an ethercalc edit');
+      ContentDAO.Content.getContent(data.contentId, function(err, contentObj) {
         if (err) {
-          return callback(err);
+          reject(err);
+          // return callback(err);
         }
 
-        const ctx = Context.fromUser(principal);
-        Ethercalc.getHTML(roomId, function(err, html) {
+        const roomId = contentObj.ethercalcRoomId;
+        PrincipalsDAO.getPrincipal(data.userId, function(err, principal) {
           if (err) {
-            return callback(err);
+            reject(err);
+            // return callback(err);
           }
 
-          // Get the latest OAE revision and compare the html to what's in Ethercalc.
-          // We only need to create a new revision if there is an actual update
-          ContentDAO.Revisions.getRevision(contentObj.latestRevisionId, function(err, revision) {
+          const ctx = Context.fromUser(principal);
+          Ethercalc.getHTML(roomId, function(err, html) {
             if (err) {
-              return callback(err);
+              reject(err);
+              // return callback(err);
             }
 
-            if (
-              Ethercalc.isContentEqual(revision.ethercalcHtml, html) ||
-              (!revision.ethercalcHtml && Ethercalc.isContentEmpty(html))
-            ) {
-              // Spreadsheet has had edits but content has not changed - no further action necessary
-              emitter.emit(ContentConstants.events.EDITED_COLLABSHEET, ctx, contentObj);
-
-              return callback();
-            }
-
-            // Otherwise we create a new revision
-            const newRevisionId = _generateRevisionId(contentObj.id);
-            Ethercalc.getRoom(roomId, function(err, snapshot) {
+            // Get the latest OAE revision and compare the html to what's in Ethercalc.
+            // We only need to create a new revision if there is an actual update
+            ContentDAO.Revisions.getRevision(contentObj.latestRevisionId, function(err, revision) {
               if (err) {
-                return callback(err);
+                reject(err);
+                // return callback(err);
               }
 
-              ContentDAO.Revisions.createRevision(
-                newRevisionId,
-                contentObj.id,
-                data.userId,
-                {
-                  ethercalcHtml: html,
-                  ethercalcSnapshot: snapshot
-                },
-                function(err, revision) {
-                  if (err) {
-                    log().error(
-                      {
-                        err,
-                        contentId: contentObj.id
-                      },
-                      'Could not create a revision for this collaborative spreadsheet'
-                    );
-                    return callback({
-                      code: 500,
-                      msg: 'Could not create a revision for this collaborative spreadsheet'
-                    });
-                  }
+              if (
+                Ethercalc.isContentEqual(revision.ethercalcHtml, html) ||
+                (!revision.ethercalcHtml && Ethercalc.isContentEmpty(html))
+              ) {
+                // Spreadsheet has had edits but content has not changed - no further action necessary
+                emitter.emit(ContentConstants.events.EDITED_COLLABSHEET, ctx, contentObj);
 
-                  // eslint-disable-next-line no-unused-vars
-                  Ethercalc.getRoom(roomId, function(err, snapshot) {
+                resolve();
+                // return callback();
+              }
+
+              // Otherwise we create a new revision
+              const newRevisionId = _generateRevisionId(contentObj.id);
+              Ethercalc.getRoom(roomId, function(err, snapshot) {
+                if (err) {
+                  reject();
+                  // return callback(err);
+                }
+
+                ContentDAO.Revisions.createRevision(
+                  newRevisionId,
+                  contentObj.id,
+                  data.userId,
+                  {
+                    ethercalcHtml: html,
+                    ethercalcSnapshot: snapshot
+                  },
+                  function(err, revision) {
                     if (err) {
                       log().error(
                         {
                           err,
                           contentId: contentObj.id
                         },
-                        'Failed to fetch Ethercalc snapshot for this collaborative spreadsheet'
+                        'Could not create a revision for this collaborative spreadsheet'
                       );
-                      return callback({
-                        code: 500,
-                        msg: 'Failed to fetch Ethercalc snapshot for this collaborative spreadsheet'
-                      });
+                      const error = new Error('Could not create a revision for this collaborative spreadsheet');
+                      error.code = 500;
+                      reject(error);
                     }
 
-                    // Update the content so we can easily retrieve it.
-                    // This will also bump the collabsheet to the top of the library lists
-                    ContentDAO.Content.updateContent(
-                      contentObj,
-                      {
-                        latestRevisionId: revision.revisionId
-                      },
-                      true,
-                      function(err, newContentObj) {
-                        if (err) {
-                          log().error(
-                            {
-                              err,
-                              contentId: contentObj.id
-                            },
-                            'Could not update the main content this collaborative spreadsheet'
-                          );
-                          return callback({
-                            code: 500,
-                            msg: 'Could not update this collaborative spreadsheet'
-                          });
-                        }
-
-                        // Add the revision on the content object so the UI doesn't have to do another request to get the HTML
-                        newContentObj.latestRevision = revision;
-                        // Emit an event for activities and preview processing
-                        emitter.emit(
-                          ContentConstants.events.UPDATED_CONTENT_BODY,
-                          ctx,
-                          newContentObj,
-                          contentObj,
-                          revision
+                    // eslint-disable-next-line no-unused-vars
+                    Ethercalc.getRoom(roomId, function(err, snapshot) {
+                      if (err) {
+                        log().error(
+                          {
+                            err,
+                            contentId: contentObj.id
+                          },
+                          'Failed to fetch Ethercalc snapshot for this collaborative spreadsheet'
                         );
-                        return callback();
+                        const error = new Error(
+                          'Failed to fetch Ethercalc snapshot for this collaborative spreadsheet'
+                        );
+                        error.code = 500;
+                        reject(error);
                       }
-                    );
-                  });
-                }
-              );
+
+                      // Update the content so we can easily retrieve it.
+                      // This will also bump the collabsheet to the top of the library lists
+                      ContentDAO.Content.updateContent(
+                        contentObj,
+                        {
+                          latestRevisionId: revision.revisionId
+                        },
+                        true,
+                        function(err, newContentObj) {
+                          if (err) {
+                            log().error(
+                              {
+                                err,
+                                contentId: contentObj.id
+                              },
+                              'Could not update the main content this collaborative spreadsheet'
+                            );
+                            const error = new Error('Could not update this collaborative spreadsheet');
+                            error.code = 500;
+                            reject(error);
+                          }
+
+                          // Add the revision on the content object so the UI doesn't have to do another request to get the HTML
+                          newContentObj.latestRevision = revision;
+                          // Emit an event for activities and preview processing
+                          emitter.emit(
+                            ContentConstants.events.UPDATED_CONTENT_BODY,
+                            ctx,
+                            newContentObj,
+                            contentObj,
+                            revision
+                          );
+                          resolve();
+                          // return callback();
+                        }
+                      );
+                    });
+                  }
+                );
+              });
             });
           });
         });
       });
     });
+  }).catch(error => {
+    throw error;
   });
 };
 

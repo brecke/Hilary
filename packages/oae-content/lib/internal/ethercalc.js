@@ -339,16 +339,20 @@ const isContentEqual = function(one, other) {
  * @param  {Object}     callback.err            An error that occurred, if any
  * @api private
  */
-const setEditedBy = function(data, callback) {
-  if (data.contentId && data.userId) {
-    ContentDAO.Ethercalc.setEditedBy(data.contentId, data.userId, function(err) {
-      if (err) {
-        return callback(err);
-      }
+const setEditedBy = function(data) {
+  return new Promise((resolve, reject) => {
+    if (data.contentId && data.userId) {
+      ContentDAO.Ethercalc.setEditedBy(data.contentId, data.userId, function(err) {
+        if (err) {
+          reject(err);
+          // return callback(err);
+        }
 
-      return callback(null);
-    });
-  }
+        resolve();
+        // return callback(null);
+      });
+    }
+  });
 };
 
 /**

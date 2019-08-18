@@ -15,6 +15,7 @@
 
 import redis from 'redis';
 import { logger } from 'oae-logger';
+import { promisifyAll } from 'bluebird';
 
 const log = logger('oae-redis');
 
@@ -135,4 +136,16 @@ const flush = function(callback) {
   }
 };
 
-export { createClient, getClient, flush, init };
+const promiseToFlush = async () => {
+  promisifyAll(redis.RedisClient.prototype);
+  promisifyAll(redis.Multi.prototype);
+  try {
+    await client.flushdbAsync([]);
+  } catch (error) {
+    const err = new Error('Unable to flush redis. Try initializing it first.');
+    log().error({ err: error }, err.message);
+    throw err;
+  }
+};
+
+export { createClient, getClient, flush, promiseToFlush, init };
