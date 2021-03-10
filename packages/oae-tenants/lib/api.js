@@ -205,7 +205,10 @@ const init = function (_serverConfig, callback) {
         active: true
       });
     } else {
-      request.tenant = getTenantByHost(request.headers.host);
+      let referer = request.headers.referer || 'http://www.guest.oae.com';
+      referer = referer.split('/').slice(2, 3).pop();
+      request.tenant = getTenantByHost(referer);
+      // request.tenant = getTenantByHost(request.headers.host);
     }
 
     // We stop the request if we can't find a tenant associated to the current hostname

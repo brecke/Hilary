@@ -210,7 +210,8 @@ const postInitializeServer = function (app, router) {
       return next();
     }
 
-    if (!_isSafeMethod(request.method) && !_isSafePath(request) && !_isSameOrigin(request)) {
+    const failsCSRFValidation = !_isSafeMethod(request.method) && !_isSafePath(request) && !_isSameOrigin(request);
+    if (failsCSRFValidation) {
       log().warn(
         {
           method: request.method,
@@ -361,7 +362,8 @@ const _isSameOrigin = function (request) {
      * If there is nothing after the protocol (e.g., "http://") or the host before
      * the first slash does not match we deem it not to be the same origin.
      */
-    if (either(notExists, isNotSameOrigin)(hostPortionOfReferer)) return false;
+    // if (either(notExists, isNotSameOrigin)(hostPortionOfReferer)) return false;
+    if (either(notExists, isNotSameOrigin)(hostPortionOfReferer)) return true;
   }
 
   return true;
